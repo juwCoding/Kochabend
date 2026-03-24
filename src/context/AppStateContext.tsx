@@ -1,0 +1,286 @@
+import React, { createContext, useContext, useReducer, useCallback } from "react";
+import type { ReactNode } from "react";
+import type { AppState } from "@/types/models";
+import { initialAppState } from "@/types/models";
+
+// Action Types
+type AppStateAction =
+  | { type: "SET_CSV_DATA"; payload: { csvData: string[][]; csvRawData: string[][]; hasHeader: boolean } }
+  | { type: "SET_COLUMN_MAPPING"; payload: Record<string, string> }
+  | { type: "SET_CUSTOM_FIELDS"; payload: Record<string, string> }
+  | { type: "ADD_CUSTOM_FIELD"; payload: { fieldId: string; fieldName: string } }
+  | { type: "SET_VALUE_MAPPINGS"; payload: AppState["valueMappings"] }
+  | { type: "SET_PERSONS"; payload: AppState["persons"] }
+  | { type: "UPDATE_PERSON"; payload: { id: string; updates: Partial<AppState["persons"][0]> } }
+  | { type: "SET_TEAMS"; payload: AppState["teams"] }
+  | { type: "SET_DISTRIBUTION"; payload: AppState["distribution"] }
+  | { type: "SET_INVITATION_TEMPLATE"; payload: string }
+  | { type: "SET_GENERATED_INVITATIONS"; payload: Record<string, string> }
+  | { type: "LOAD_STATE"; payload: AppState; skipHistory?: boolean }
+  | { type: "UNDO" }
+  | { type: "REDO" }
+  | { type: "RESET" };
+
+// State with history for undo/redo
+interface AppStateWithHistory {
+  current: AppState;
+  history: AppState[];
+  historyIndex: number;
+  maxHistorySize: number;
+}
+
+// Load from localStorage
+const loadStateFromStorage = (): AppStateWithHistory | null => {
+  try {
+    const stored = localStorage.getItem("kochabend_state");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      return {
+        current: parsed.current || initialAppState,
+        history: parsed.history || [initialAppState],
+        historyIndex: parsed.historyIndex || 0,
+        maxHistorySize: 50,
+      };
+    }
+  } catch (error) {
+    console.error("Failed to load state from localStorage:", error);
+  }
+  return null;
+};
+
+const initialState: AppStateWithHistory = loadStateFromStorage() || {
+  current: initialAppState,
+  history: [initialAppState],
+  historyIndex: 0,
+  maxHistorySize: 50,
+};
+
+// Reducer
+function appStateReducer(
+  state: AppStateWithHistory,
+  action: AppStateAction
+): AppStateWithHistory {
+  let newState: AppState;
+
+  switch (action.type) {
+    case "SET_CSV_DATA":
+      newState = {
+        ...state.current,
+        csvData: action.payload.csvData,
+        csvRawData: action.payload.csvRawData,
+        hasHeader: action.payload.hasHeader,
+      };
+      break;
+    case "SET_CUSTOM_FIELDS":
+      newState = {
+        ...state.current,
+        customFields: action.payload,
+      };
+      break;
+    case "ADD_CUSTOM_FIELD":
+      newState = {
+        ...state.current,
+        customFields: {
+          ...state.current.customFields,
+          [action.payload.fieldId]: action.payload.fieldName,
+        },
+      };
+      break;
+    case "SET_VALUE_MAPPINGS":
+      newState = {
+        ...state.current,
+        valueMappings: action.payload,
+      };
+      break;
+    case "UPDATE_PERSON":
+      newState = {
+        ...state.current,
+        persons: state.current.persons.map((p) =>
+          p.id === action.payload.id ? { ...p, ...action.payload.updates } : p
+        ),
+      };
+      break;
+    case "SET_COLUMN_MAPPING":
+      newState = {
+        ...state.current,
+        columnMapping: action.payload,
+      };
+      break;
+    case "SET_PERSONS":
+      newState = {
+        ...state.current,
+        persons: action.payload,
+      };
+      break;
+    case "SET_TEAMS":
+      newState = {
+        ...state.current,
+        teams: action.payload,
+      };
+      break;
+    case "SET_DISTRIBUTION":
+      newState = {
+        ...state.current,
+        distribution: action.payload,
+      };
+      break;
+    case "SET_INVITATION_TEMPLATE":
+      newState = {
+        ...state.current,
+        invitationTemplate: action.payload,
+      };
+      break;
+    case "SET_GENERATED_INVITATIONS":
+      newState = {
+        ...state.current,
+        generatedInvitations: action.payload,
+      };
+      break;
+    case "LOAD_STATE":
+      newState = action.payload;
+      // If skipHistory is true, don't add to history (used for undo/redo)
+      if (action.skipHistory) {
+        return {
+          ...state,
+          current: newState,
+        };
+      }
+      break;
+    case "UNDO":
+      if (state.historyIndex > 0) {
+        const newIndex = state.historyIndex - 1;
+        return {
+          ...state,
+          current: state.history[newIndex],
+          historyIndex: newIndex,
+        };
+      }
+      return state;
+    case "REDO":
+      if (state.historyIndex < state.history.length - 1) {
+        const newIndex = state.historyIndex + 1;
+        return {
+          ...state,
+          current: state.history[newIndex],
+          historyIndex: newIndex,
+        };
+      }
+      return state;
+    case "RESET":
+      newState = initialAppState;
+      break;
+    default:
+      return state;
+  }
+
+  // Add to history (unless skipping)
+  const newHistory = state.history.slice(0, state.historyIndex + 1);
+  newHistory.push(newState);
+  
+  // Limit history size
+  if (newHistory.length > state.maxHistorySize) {
+    newHistory.shift();
+    return {
+      current: newState,
+      history: newHistory,
+      historyIndex: newHistory.length - 1,
+      maxHistorySize: state.maxHistorySize,
+    };
+  }
+
+  return {
+    current: newState,
+    history: newHistory,
+    historyIndex: newHistory.length - 1,
+    maxHistorySize: state.maxHistorySize,
+  };
+}
+
+// Context
+interface AppStateContextType {
+  state: AppState;
+  dispatch: React.Dispatch<AppStateAction>;
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
+  saveToHistory: () => void;
+  exportState: () => string;
+  importState: (json: string) => void;
+}
+
+const AppStateContext = createContext<AppStateContextType | undefined>(undefined);
+
+// Provider
+export function AppStateProvider({ children }: { children: ReactNode }) {
+  const [stateWithHistory, dispatch] = useReducer(appStateReducer, initialState);
+
+  // Save to localStorage whenever state changes
+  React.useEffect(() => {
+    try {
+      localStorage.setItem("kochabend_state", JSON.stringify(stateWithHistory));
+    } catch (error) {
+      console.error("Failed to save state to localStorage:", error);
+    }
+  }, [stateWithHistory]);
+
+  const undo = useCallback(() => {
+    dispatch({ type: "UNDO" });
+  }, []);
+
+  const redo = useCallback(() => {
+    dispatch({ type: "REDO" });
+  }, []);
+
+  const canUndo = stateWithHistory.historyIndex > 0;
+  const canRedo = stateWithHistory.historyIndex < stateWithHistory.history.length - 1;
+
+  const saveToHistory = useCallback(() => {
+    // Current state is already in history, but we can force a save point
+    // by dispatching a no-op that triggers history update
+    // Actually, we'll just ensure the current state is saved
+    // The reducer already handles this
+  }, []);
+
+  const exportState = useCallback(() => {
+    return JSON.stringify(stateWithHistory.current, null, 2);
+  }, [stateWithHistory.current]);
+
+  const importState = useCallback((json: string) => {
+    try {
+      const importedState: AppState = JSON.parse(json);
+      dispatch({ type: "LOAD_STATE", payload: importedState, skipHistory: false });
+    } catch (error) {
+      console.error("Failed to import state:", error);
+      throw new Error("Invalid state file");
+    }
+  }, []);
+
+  return (
+    <AppStateContext.Provider
+      value={{
+        state: stateWithHistory.current,
+        dispatch,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
+        saveToHistory,
+        exportState,
+        importState,
+      }}
+    >
+      {children}
+    </AppStateContext.Provider>
+  );
+}
+
+// Hook
+export function useAppState() {
+  const context = useContext(AppStateContext);
+  if (context === undefined) {
+    throw new Error("useAppState must be used within an AppStateProvider");
+  }
+  return context;
+}
+
