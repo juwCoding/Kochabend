@@ -18,7 +18,7 @@ export function Wizard({ currentStep, totalSteps, onStepChange, children, canPro
     <div className="space-y-6">
       {/* Step indicator */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center">
           {Array.from({ length: totalSteps }).map((_, index) => (
             <div key={index} className="flex items-center">
               <div
@@ -41,9 +41,6 @@ export function Wizard({ currentStep, totalSteps, onStepChange, children, canPro
               )}
             </div>
           ))}
-        </div>
-        <div className="text-sm text-muted-foreground">
-          Schritt {currentStep + 1} von {totalSteps}
         </div>
       </div>
 

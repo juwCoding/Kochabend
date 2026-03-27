@@ -34,25 +34,42 @@ export function Step1CSVImport() {
     const file = event.target.files?.[0];
     if (!file) return;
 
+    let nextHasHeader = hasHeader;
+    if (state.csvRawData.length > 0) {
+      const shouldOverride = window.confirm(
+        "Es ist bereits eine CSV-Datei geladen. Wenn Sie fortfahren, werden alle bisherigen Daten überschrieben. Möchten Sie fortfahren?"
+      );
+
+      if (!shouldOverride) {
+        event.target.value = "";
+        return;
+      }
+
+      dispatch({ type: "RESET" });
+      nextHasHeader = false;
+    }
+
     setError(null);
     setIsProcessing(true);
 
     parseCSVFile(file, {
-      hasHeader: false, // Parse with header first to show preview
+      hasHeader: false,
       onComplete: (data) => {
         dispatch({
           type: "SET_CSV_DATA",
           payload: {
-            csvData: hasHeader && data.length > 0 ? data.slice(1) : data,
+            csvData: nextHasHeader && data.length > 0 ? data.slice(1) : data,
             csvRawData: data,
-            hasHeader,
+            hasHeader: nextHasHeader,
           },
         });
         setIsProcessing(false);
+        event.target.value = "";
       },
       onError: (err) => {
         setError(err.message);
         setIsProcessing(false);
+        event.target.value = "";
       },
     });
   };
