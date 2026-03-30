@@ -87,24 +87,6 @@ export function Step1CSVImport() {
       },
     });
   };
-
-  const handleConfirm = () => {
-    // Apply header setting
-    let finalData = previewData;
-    if (hasHeader && previewData.length > 0) {
-      finalData = previewData.slice(1);
-    }
-
-    dispatch({
-      type: "SET_CSV_DATA",
-      payload: {
-        csvData: finalData,
-        csvRawData: previewData,
-        hasHeader,
-      },
-    });
-  };
-
   const handleColumnMappingChange = (csvColumnIndex: number, field: string) => {
     const columnKey = `column_${csvColumnIndex}`;
     const newMapping = { ...state.columnMapping };
@@ -254,8 +236,29 @@ export function Step1CSVImport() {
 
         {previewData.length > 0 && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Spalten-Mapping</h3>
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Spalten-Mapping</h3>
+                <details className="text-sm text-muted-foreground">
+                  <summary className="cursor-pointer select-none">Erklärung der Felder anzeigen</summary>
+                  <div className="mt-2 space-y-3">
+                    <div className="space-y-1">
+                      <p className="font-semibold text-foreground">Verpflichtend</p>
+                      <p><strong>Name:</strong> Name der teilnehmenden Person.</p>
+                      <p><strong>Ernährungsform:</strong> z. B. vegan, vegetarisch oder egal.</p>
+                      <p><strong>Unverträglichkeiten:</strong> Allergien oder Unverträglichkeiten als Freitext.</p>
+                      <p><strong>Küche:</strong> Gibt an, ob in der eigenen Küche gekocht werden kann, beim Partner gekocht wird oder nicht.</p>
+                      <p><strong>Küchen-Adresse:</strong> Adresse der Küche, die für das Hosting verwendet wird.</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="font-semibold text-foreground">Optional</p>
+                      <p><strong>Partner:</strong> Name der Partnerperson, damit ein gemeinsames Team gebildet werden kann.</p>
+                      <p><strong>Gericht-Präferenz:</strong> Wunschgang (Vorspeise, Hauptgang, Nachspeise oder keine Präferenz).</p>
+                      <p><strong>Freifelder:</strong> Zusätzliche CSV-Spalten ohne feste Funktion; werden als Zusatzinfos übernommen.</p>
+                    </div>
+                  </div>
+                </details>
+              </div>
               <Dialog open={isCustomFieldDialogOpen} onOpenChange={setIsCustomFieldDialogOpen}>
                 <DialogTrigger asChild>
                   <Button variant="outline" size="sm">
@@ -292,7 +295,8 @@ export function Step1CSVImport() {
             </div>
 
             {Object.keys(state.customFields).length > 0 && (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 items-center">
+                <span className="text-sm font-semibold text-foreground">Freifelder:</span>
                 {Object.entries(state.customFields).map(([fieldId, fieldName]) => (
                   <div
                     key={fieldId}
@@ -315,8 +319,7 @@ export function Step1CSVImport() {
                 <TableHeader>
                   <TableRow>
                     {Array.from({ length: columnCount }).map((_, index) => (
-                      <TableHead key={index} className="relative">
-                        <div className="space-y-2">
+                      <TableHead key={index} className="relative py-2">
                           <div className="text-xs font-medium">
                             Spalte {index + 1}
                             {headerRow && (
@@ -348,7 +351,6 @@ export function Step1CSVImport() {
                                 ))}
                             </SelectContent>
                           </Select>
-                        </div>
                       </TableHead>
                     ))}
                   </TableRow>
@@ -371,15 +373,15 @@ export function Step1CSVImport() {
             </div>
 
             {!requiredFieldsMapped && (
-              <div className="p-4 bg-yellow-500/10 border border-yellow-500 rounded-md">
-                <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400 mb-2">
+              <div className="p-4 border-2 border-orange-500 rounded-md">
+                <p className="text-sm font-semibold text-foreground mb-2">
                   Noch zuordnen:
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {missingRequiredFields.map((field) => (
                     <span
                       key={field}
-                      className="px-2 py-1 bg-yellow-500/20 rounded text-sm text-yellow-800 dark:text-yellow-300"
+                      className="px-2 py-1 rounded text-sm font-semibold border border-orange-500 text-foreground"
                     >
                       {COLUMN_FIELDS[field]}
                     </span>
@@ -387,14 +389,6 @@ export function Step1CSVImport() {
                 </div>
               </div>
             )}
-
-            <Button
-              onClick={handleConfirm}
-              className="w-full"
-              disabled={!requiredFieldsMapped}
-            >
-              Daten bestätigen und weiter
-            </Button>
           </div>
         )}
       </div>
