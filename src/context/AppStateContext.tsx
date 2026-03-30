@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useReducer, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { AppState } from "@/types/models";
-import { initialAppState } from "@/types/models";
+import { clampWizardStepIndex } from "@/types/models";
+import { getDefaultAppState, hydrateValueMappingsIfEmpty } from "@/defaultValueMappings";
 
 // Action Types
 type AppStateAction =
@@ -17,6 +18,7 @@ type AppStateAction =
   | { type: "SET_INVITATION_TEMPLATE"; payload: string }
   | { type: "SET_GENERATED_INVITATIONS"; payload: Record<string, string> }
   | { type: "LOAD_STATE"; payload: AppState; skipHistory?: boolean }
+  | { type: "SET_CURRENT_STEP"; payload: number }
   | { type: "UNDO" }
   | { type: "REDO" }
   | { type: "RESET" };
@@ -29,16 +31,30 @@ interface AppStateWithHistory {
   maxHistorySize: number;
 }
 
+function hydrateAppStateShape(base: AppState): AppState {
+  return {
+    ...base,
+    currentStep: clampWizardStepIndex(
+      typeof base.currentStep === "number" ? base.currentStep : 0
+    ),
+    valueMappings: hydrateValueMappingsIfEmpty(base.valueMappings),
+  };
+}
+
 // Load from localStorage
 const loadStateFromStorage = (): AppStateWithHistory | null => {
   try {
     const stored = localStorage.getItem("kochabend_state");
     if (stored) {
       const parsed = JSON.parse(stored);
+      const base = parsed.current || getDefaultAppState();
+      const current = hydrateAppStateShape(base);
+      const historyRaw = parsed.history || [current];
+      const history = historyRaw.map((h: AppState) => hydrateAppStateShape(h));
       return {
-        current: parsed.current || initialAppState,
-        history: parsed.history || [initialAppState],
-        historyIndex: parsed.historyIndex || 0,
+        current,
+        history,
+        historyIndex: parsed.historyIndex ?? 0,
         maxHistorySize: 50,
       };
     }
@@ -48,9 +64,11 @@ const loadStateFromStorage = (): AppStateWithHistory | null => {
   return null;
 };
 
+const freshState = getDefaultAppState();
+
 const initialState: AppStateWithHistory = loadStateFromStorage() || {
-  current: initialAppState,
-  history: [initialAppState],
+  current: freshState,
+  history: [freshState],
   historyIndex: 0,
   maxHistorySize: 50,
 };
@@ -137,7 +155,7 @@ function appStateReducer(
       };
       break;
     case "LOAD_STATE":
-      newState = action.payload;
+      newState = hydrateAppStateShape(action.payload);
       // If skipHistory is true, don't add to history (used for undo/redo)
       if (action.skipHistory) {
         return {
@@ -146,6 +164,14 @@ function appStateReducer(
         };
       }
       break;
+    case "SET_CURRENT_STEP":
+      return {
+        ...state,
+        current: {
+          ...state.current,
+          currentStep: clampWizardStepIndex(action.payload),
+        },
+      };
     case "UNDO":
       if (state.historyIndex > 0) {
         const newIndex = state.historyIndex - 1;
@@ -167,7 +193,7 @@ function appStateReducer(
       }
       return state;
     case "RESET":
-      newState = initialAppState;
+      newState = getDefaultAppState();
       break;
     default:
       return state;
@@ -249,7 +275,14 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   const importState = useCallback((json: string) => {
     try {
       const importedState: AppState = JSON.parse(json);
-      dispatch({ type: "LOAD_STATE", payload: importedState, skipHistory: false });
+      dispatch({
+        type: "LOAD_STATE",
+        payload: hydrateAppStateShape({
+          ...importedState,
+          valueMappings: hydrateValueMappingsIfEmpty(importedState.valueMappings),
+        }),
+        skipHistory: false,
+      });
     } catch (error) {
       console.error("Failed to import state:", error);
       throw new Error("Invalid state file");

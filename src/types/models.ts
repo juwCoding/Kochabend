@@ -17,17 +17,35 @@ export type Course = "Vorspeise" | "Hauptgang" | "Nachspeise";
 export interface Person {
   id: string;
   name: string;
-  preference: FoodPreference;
+  /** Effektiver Wert: manuell gesetzt oder aus Mapping (Standard/Benutzer). */
+  preference?: FoodPreference;
   intolerances: string;
   partner?: string; // Name des Partners (früher "group")
-  kitchen: KitchenStatus;
+  kitchen?: KitchenStatus;
   kitchenAddress: string; // Adresse der Küche
-  coursePreference?: CoursePreference; // Optional
+  coursePreference?: CoursePreference;
+  /** Explizite Auswahl in Schritt 2 (schlägt Mapping). */
+  preferenceManual?: FoodPreference;
+  kitchenManual?: KitchenStatus;
+  coursePreferenceManual?: CoursePreference;
   // Ursprüngliche CSV-Werte (vor Mapping)
   _rawValues?: {
     preference?: string;
     kitchen?: string;
     coursePreference?: string;
+  };
+  /** Freifelder aus Schritt 1 (fieldId z. B. custom_… → Zellwert). */
+  customFieldValues?: Record<string, string>;
+  /**
+   * Textfelder aus CSV (Snapshot), unverändert bei manueller Bearbeitung in Schritt 2.
+   * Nicht für Ernährungsform / Küche / Gericht (dort _rawValues + Mapping).
+   */
+  textSnapshot?: {
+    name?: string;
+    intolerances?: string;
+    partner?: string;
+    kitchenAddress?: string;
+    custom?: Record<string, string>;
   };
 }
 
@@ -68,10 +86,22 @@ export interface ValueMapping {
   field: "kitchen" | "preference" | "coursePreference";
   rawValue: string; // Wert aus CSV
   mappedValue: string; // Zugeordneter Wert
+  /** Zeile aus den eingebauten Standard-Mappings (nur Metadaten / UI) */
+  isDefault?: boolean;
+}
+
+/** Anzahl der Wizard-Schritte (muss mit `STEPS` in App.tsx übereinstimmen). */
+export const WIZARD_STEP_COUNT = 5;
+
+export function clampWizardStepIndex(step: number): number {
+  return Math.max(0, Math.min(Math.floor(step), WIZARD_STEP_COUNT - 1));
 }
 
 // Vollständiger App-State
 export interface AppState {
+  /** Aktuell geöffneter Wizard-Schritt (0-basiert), persistent. */
+  currentStep: number;
+
   // Schritt 1: CSV Import
   csvData: string[][]; // Rohe CSV-Daten
   csvRawData: string[][]; // Rohe CSV-Daten vor Header-Entfernung
@@ -94,8 +124,9 @@ export interface AppState {
   generatedInvitations: Record<string, string>; // Person ID -> generierte Einladung
 }
 
-// Initialer State
+// Initialer State (ohne Standard-Wert-Mappings — vollständig: getDefaultAppState() in defaultValueMappings.ts)
 export const initialAppState: AppState = {
+  currentStep: 0,
   csvData: [],
   csvRawData: [],
   columnMapping: {},

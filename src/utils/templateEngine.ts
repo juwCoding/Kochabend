@@ -36,8 +36,8 @@ export function replacePlaceholders(
 
   // Basic person fields
   result = result.replace(/\{\{Name\}\}/g, person.name);
-  result = result.replace(/\{\{Ernährungsform\}\}/g, person.preference);
-  result = result.replace(/\{\{Präferenz\}\}/g, person.preference); // Rückwärtskompatibilität
+  result = result.replace(/\{\{Ernährungsform\}\}/g, person.preference ?? "");
+  result = result.replace(/\{\{Präferenz\}\}/g, person.preference ?? ""); // Rückwärtskompatibilität
   result = result.replace(/\{\{Unverträglichkeiten\}\}/g, person.intolerances || "");
   result = result.replace(/\{\{Adresse\}\}/g, person.kitchenAddress);
   // Partner: aus Team oder person.partner
@@ -49,7 +49,7 @@ export function replacePlaceholders(
   }
   result = result.replace(/\{\{Gruppe\}\}/g, partnerName); // Rückwärtskompatibilität
   result = result.replace(/\{\{Partner\}\}/g, partnerName);
-  result = result.replace(/\{\{Küche\}\}/g, person.kitchen);
+  result = result.replace(/\{\{Küche\}\}/g, person.kitchen ?? "");
   result = result.replace(/\{\{Gericht-Präferenz\}\}/g, person.coursePreference || "");
 
   // Team fields

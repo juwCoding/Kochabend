@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -6,9 +7,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { Person } from "@/types/models";
-import { findSimilarNames, findDuplicateAddresses, validatePreferences } from "@/utils/matching";
+import {
+  findSimilarNames,
+  findDuplicateAddresses,
+  isCourseColumnMapped,
+  validatePreferences,
+} from "@/utils/matching";
+import {
+  formatCourseLabel,
+  formatFoodPreferenceLabel,
+  formatKitchenLabel,
+  getMappedOnlyCourse,
+  getMappedOnlyKitchen,
+  getMappedOnlyPreference,
+  mappingSourceLabel,
+  recomputeEffectiveFields,
+} from "@/utils/valueResolution";
 import { AlertCircle, CheckCircle2, Settings } from "lucide-react";
 import type { FoodPreference, KitchenStatus, CoursePreference } from "@/types/models";
+import { cn } from "@/lib/utils";
 
 interface DataIssue {
   type: "similar_names" | "duplicate_address" | "validation";
@@ -17,6 +34,169 @@ interface DataIssue {
   severity: "warning" | "error";
   field?: string; // Feld, das den Fehler verursacht
   personId?: string; // Person, die den Fehler hat
+}
+
+function cellErrorClass(issues: DataIssue[]): string {
+  return issues.some((i) => i.severity === "error")
+    ? "border border-destructive/60 bg-destructive/10"
+    : "";
+}
+
+function normText(s: string | undefined): string {
+  return (s ?? "").trim();
+}
+
+/** Nur custom_*-Spalten aus CSV; Zeilenindex = Personenindex. */
+function mergeCustomFieldValuesFromCsv(
+  persons: Person[],
+  csvData: string[][],
+  columnMapping: Record<string, string>
+): Person[] {
+  return persons.map((person, i) => {
+    const row = csvData[i];
+    if (!row) return person;
+    const customValues: Record<string, string> = {};
+    for (const [columnKey, field] of Object.entries(columnMapping)) {
+      if (field === "__none__" || !field.startsWith("custom_")) continue;
+      const columnIndex = parseInt(columnKey.replace("column_", ""), 10);
+      if (columnIndex >= 0 && columnIndex < row.length) {
+        customValues[field] = row[columnIndex]?.trim() ?? "";
+      }
+    }
+    const ts = person.textSnapshot ?? {
+      name: person.name ?? "",
+      intolerances: person.intolerances ?? "",
+      partner: person.partner ?? "",
+      kitchenAddress: person.kitchenAddress ?? "",
+      custom: {},
+    };
+    return {
+      ...person,
+      customFieldValues: customValues,
+      textSnapshot: {
+        ...ts,
+        custom: { ...customValues },
+      },
+    };
+  });
+}
+
+function buildTextSnapshotFromPerson(p: Partial<Person> & { customFieldValues?: Record<string, string> }): NonNullable<Person["textSnapshot"]> {
+  return {
+    name: p.name ?? "",
+    intolerances: p.intolerances ?? "",
+    partner: p.partner ?? "",
+    kitchenAddress: p.kitchenAddress ?? "",
+    custom: { ...(p.customFieldValues ?? {}) },
+  };
+}
+
+/** Manueller Wert oben (schwarz), CSV-Original unten (grau), wenn abweichend. */
+function TextFieldStack({
+  value,
+  original,
+  editing,
+  input,
+  onViewClick,
+  errorClassName,
+}: {
+  value: string;
+  original: string | undefined;
+  editing: boolean;
+  input: ReactNode;
+  onViewClick: () => void;
+  errorClassName?: string;
+}) {
+  const changed = original !== undefined && normText(value) !== normText(original);
+  if (editing) {
+    return (
+      <div className="flex flex-col gap-1 min-w-[10rem]">
+        {input}
+        {changed && (
+          <div className="text-xs text-muted-foreground leading-tight">
+            Aus CSV: {normText(original) === "" ? "(leer)" : original}
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (changed) {
+    return (
+      <div
+        className={cn("space-y-0.5 min-w-[10rem] cursor-pointer", errorClassName)}
+        onClick={onViewClick}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onViewClick();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+      >
+        <div className="text-sm font-semibold text-foreground leading-tight">
+          {normText(value) === "" ? "(leer)" : value}
+        </div>
+        <div className="text-xs text-muted-foreground leading-tight">
+          Aus CSV: {normText(original) === "" ? "(leer)" : original}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <span className={errorClassName} onClick={onViewClick} style={{ cursor: "pointer" }}>
+      {value}
+    </span>
+  );
+}
+
+function MappedEnumStack({
+  rawLabel,
+  rawValue,
+  mappedValue,
+  mappedSource,
+  manualValue,
+  formatMapped,
+  formatManual,
+}: {
+  rawLabel: string;
+  rawValue: string | undefined;
+  mappedValue: string | null;
+  mappedSource: "user" | "default" | null;
+  manualValue: string | null;
+  formatMapped: (v: string) => string;
+  formatManual: (v: string) => string;
+}) {
+  const hasManual = manualValue !== null;
+  const hasMapped = mappedValue !== null && mappedSource !== null;
+  const showMappedSecondary =
+    hasMapped && hasManual && manualValue !== null && mappedValue !== manualValue;
+  const showMappedPrimary = hasMapped && !hasManual;
+
+  return (
+    <div className="space-y-0.5 min-w-[10rem]">
+      {hasManual && (
+        <div className="text-sm font-semibold leading-tight">
+          Manuell: {formatManual(manualValue)}
+        </div>
+      )}
+      {showMappedSecondary && (
+        <div className="text-sm text-muted-foreground leading-tight">
+          {mappingSourceLabel(mappedSource!)}: {formatMapped(mappedValue!)}
+        </div>
+      )}
+      {showMappedPrimary && (
+        <div className="text-sm font-medium leading-tight">
+          {mappingSourceLabel(mappedSource!)}: {formatMapped(mappedValue!)}
+        </div>
+      )}
+      {rawValue !== undefined && (
+        <div className="text-xs text-muted-foreground leading-tight">
+          {rawLabel}: {rawValue === "" ? "(leer)" : rawValue}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function Step2DataCleaning() {
@@ -29,31 +209,51 @@ export function Step2DataCleaning() {
   const [newMappingRaw, setNewMappingRaw] = useState("");
   const [newMappingValue, setNewMappingValue] = useState("");
 
-  // Apply value mappings to raw CSV values
-  const applyValueMapping = (field: "kitchen" | "preference" | "coursePreference", rawValue: string): string => {
-    const mapping = state.valueMappings.find(
-      (m) => m.field === field && m.rawValue.toLowerCase() === rawValue.toLowerCase()
-    );
-    return mapping ? mapping.mappedValue : rawValue;
+  const isCourseColumnMappedHere = useMemo(
+    () => isCourseColumnMapped(state.columnMapping),
+    [state.columnMapping]
+  );
+
+  const customFieldColumns = useMemo(
+    () => Object.entries(state.customFields),
+    [state.customFields]
+  );
+
+  /** Wenn Gericht-Spalte nicht zugeordnet ist, wirkt das Dialog-Feld wie „Küche“ (kein coursePreference-UI). */
+  const activeMappingField = useMemo((): "kitchen" | "preference" | "coursePreference" => {
+    if (!isCourseColumnMappedHere && mappingField === "coursePreference") return "kitchen";
+    return mappingField;
+  }, [isCourseColumnMappedHere, mappingField]);
+
+  const commitPersons = (next: Person[]) => {
+    setPersons(next);
+    dispatch({ type: "SET_PERSONS", payload: next });
   };
 
-  // Check if a raw value has been mapped
-  const hasMapping = (field: "kitchen" | "preference" | "coursePreference", rawValue: string): boolean => {
-    if (!rawValue) return false;
-    return state.valueMappings.some(
-      (m) => m.field === field && m.rawValue.toLowerCase() === rawValue.toLowerCase()
-    );
-  };
+  /** Nur bei Änderung von CSV oder Spalten-Mapping neu einlesen — nicht bei jedem valueMappings-/Personen-Update (sonst gingen manuelle Edits verloren). */
+  const customCsvSourceKey = useMemo(
+    () => JSON.stringify({ cm: state.columnMapping, csv: state.csvData }),
+    [state.columnMapping, state.csvData]
+  );
+  const customCsvSourceRef = useRef<string>("");
 
-  // Load persons from state if they exist, otherwise convert from CSV
+  // CSV → Personen oder State übernehmen; bei Mapping-Änderung neu auflösen (manuell bleibt)
   useEffect(() => {
-    // If persons already exist in state, use them (but only if local state is empty or different)
     if (state.persons.length > 0) {
-      // Only update if the state has changed (e.g., from import or external update)
-      // Don't overwrite if we're currently editing
-      if (persons.length === 0 || JSON.stringify(persons) !== JSON.stringify(state.persons)) {
-        setPersons(state.persons);
+      let normalized = state.persons.map((p) => recomputeEffectiveFields(p, state.valueMappings));
+      if (customCsvSourceKey !== customCsvSourceRef.current) {
+        customCsvSourceRef.current = customCsvSourceKey;
+        normalized = mergeCustomFieldValuesFromCsv(normalized, state.csvData, state.columnMapping);
+        normalized = normalized.map((p) => recomputeEffectiveFields(p, state.valueMappings));
       }
+      normalized = normalized.map((p) =>
+        p.textSnapshot ? p : { ...p, textSnapshot: buildTextSnapshotFromPerson(p) }
+      );
+      if (JSON.stringify(normalized) === JSON.stringify(state.persons)) {
+        setPersons((prev) => (JSON.stringify(prev) === JSON.stringify(normalized) ? prev : normalized));
+        return;
+      }
+      commitPersons(normalized);
       return;
     }
 
@@ -66,80 +266,57 @@ export function Step2DataCleaning() {
       const person: Partial<Person> = {
         id: `person_${i}`,
         _rawValues: {},
+        customFieldValues: {},
       };
 
-      // Map CSV columns to person fields
       for (const [columnKey, field] of Object.entries(state.columnMapping)) {
         if (field === "__none__") continue;
-        
+
         const columnIndex = parseInt(columnKey.replace("column_", ""));
         if (columnIndex >= 0 && columnIndex < row.length) {
           const rawValue = row[columnIndex]?.trim() || "";
-          let value = rawValue;
-          
-          if (field.startsWith("custom_")) continue;
-          
+
+          if (field.startsWith("custom_")) {
+            person.customFieldValues![field] = rawValue;
+            continue;
+          }
+
           switch (field) {
             case "name":
-              person.name = value;
+              person.name = rawValue;
               break;
             case "preference":
-              // Speichere ursprünglichen Wert
               person._rawValues!.preference = rawValue;
-              // Wende Mapping an
-              value = applyValueMapping("preference", rawValue);
-              // Nur setzen wenn Mapping existiert oder Wert bereits gültig ist
-              if (["vegan", "vegetarisch", "egal"].includes(value)) {
-                person.preference = value as FoodPreference;
-              } else {
-                person.preference = "egal" as FoodPreference; // Fallback
-              }
               break;
             case "intolerances":
-              person.intolerances = value;
+              person.intolerances = rawValue;
               break;
             case "partner":
-              person.partner = value || undefined;
+              person.partner = rawValue || undefined;
               break;
             case "kitchen":
-              // Speichere ursprünglichen Wert
               person._rawValues!.kitchen = rawValue;
-              // Wende Mapping an
-              value = applyValueMapping("kitchen", rawValue);
-              // Nur setzen wenn Mapping existiert oder Wert bereits gültig ist
-              if (["kann_gekocht_werden", "partner_kocht", "kann_nicht_gekocht_werden"].includes(value)) {
-                person.kitchen = value as KitchenStatus;
-              } else {
-                person.kitchen = "kann_nicht_gekocht_werden" as KitchenStatus; // Fallback
-              }
-              // Wenn kitchenAddress noch nicht gesetzt ist, setze einen Standardwert
               if (!person.kitchenAddress) {
                 person.kitchenAddress = "";
               }
               break;
             case "kitchenAddress":
-              person.kitchenAddress = value;
+              person.kitchenAddress = rawValue;
               break;
             case "coursePreference":
-              // Speichere ursprünglichen Wert
               person._rawValues!.coursePreference = rawValue;
-              // Wende Mapping an
-              value = applyValueMapping("coursePreference", rawValue);
-              // Nur setzen wenn Mapping existiert oder Wert bereits gültig ist
-              if (["keine", "Vorspeise", "Hauptgang", "Nachspeise"].includes(value)) {
-                person.coursePreference = value as CoursePreference;
-              }
               break;
           }
         }
       }
 
-      // Füge Person hinzu, auch wenn Felder fehlen (werden als Fehler markiert)
-      newPersons.push(person as Person);
+      person.textSnapshot = buildTextSnapshotFromPerson(person as Partial<Person>);
+      newPersons.push(recomputeEffectiveFields(person as Person, state.valueMappings));
     }
 
-    setPersons(newPersons);
-  }, [state.csvData, state.columnMapping, state.valueMappings]);
+    commitPersons(newPersons);
+    customCsvSourceRef.current = customCsvSourceKey;
+  }, [dispatch, state.columnMapping, state.csvData, state.persons, state.valueMappings, customCsvSourceKey]);
 
   // Detect issues
   useEffect(() => {
@@ -171,7 +348,7 @@ export function Step2DataCleaning() {
     }
 
     // Validation issues
-    const validationIssues = validatePreferences(persons);
+    const validationIssues = validatePreferences(persons, state.columnMapping);
     for (const { person, issue } of validationIssues) {
       let field: string | undefined;
       if (issue.includes("Ernährungsform")) field = "preference";
@@ -189,57 +366,94 @@ export function Step2DataCleaning() {
     }
 
     setIssues(detectedIssues);
-  }, [persons]);
+  }, [persons, state.columnMapping]);
 
-  const handleConfirm = () => {
-    dispatch({
-      type: "SET_PERSONS",
-      payload: persons,
-    });
+  const handleUpdatePerson = (personId: string, field: keyof Person, value: unknown) => {
+    const next = persons.map((p) => (p.id === personId ? { ...p, [field]: value } : p));
+    commitPersons(next);
   };
 
-  const handleUpdatePerson = (personId: string, field: keyof Person, value: any) => {
-    // Update local state immediately
-    const updatedPersons = persons.map((p) => (p.id === personId ? { ...p, [field]: value } : p));
-    setPersons(updatedPersons);
-    
-    // Update global state
-    dispatch({
-      type: "UPDATE_PERSON",
-      payload: {
-        id: personId,
-        updates: { [field]: value },
-      },
-    });
-    
-    // Also update the full persons array in state to ensure consistency
-    dispatch({
-      type: "SET_PERSONS",
-      payload: updatedPersons,
-    });
+  const handleUpdateCustomField = (personId: string, fieldId: string, value: string) => {
+    const next = persons.map((p) =>
+      p.id === personId
+        ? { ...p, customFieldValues: { ...p.customFieldValues, [fieldId]: value } }
+        : p
+    );
+    commitPersons(next);
   };
+
+  const setPreferenceManual = (personId: string, value: FoodPreference) => {
+    const next = persons.map((p) =>
+      p.id === personId ? { ...p, preferenceManual: value, preference: value } : p
+    );
+    commitPersons(next);
+  };
+
+  const clearPreferenceManual = (personId: string) => {
+    const next = persons.map((p) => {
+      if (p.id !== personId) return p;
+      const cleared: Person = { ...p, preferenceManual: undefined };
+      return recomputeEffectiveFields(cleared, state.valueMappings);
+    });
+    commitPersons(next);
+  };
+
+  const setKitchenManual = (personId: string, value: KitchenStatus) => {
+    const next = persons.map((p) =>
+      p.id === personId ? { ...p, kitchenManual: value, kitchen: value } : p
+    );
+    commitPersons(next);
+  };
+
+  const clearKitchenManual = (personId: string) => {
+    const next = persons.map((p) => {
+      if (p.id !== personId) return p;
+      const cleared: Person = { ...p, kitchenManual: undefined };
+      return recomputeEffectiveFields(cleared, state.valueMappings);
+    });
+    commitPersons(next);
+  };
+
+  const setCourseManual = (personId: string, value: CoursePreference) => {
+    const next = persons.map((p) =>
+      p.id === personId ? { ...p, coursePreferenceManual: value, coursePreference: value } : p
+    );
+    commitPersons(next);
+  };
+
+  const clearCourseManual = (personId: string) => {
+    const next = persons.map((p) => {
+      if (p.id !== personId) return p;
+      const cleared: Person = { ...p, coursePreferenceManual: undefined };
+      return recomputeEffectiveFields(cleared, state.valueMappings);
+    });
+    commitPersons(next);
+  };
+
+  const isMappingDuplicate = useMemo(() => {
+    const raw = newMappingRaw.trim();
+    if (!raw) return false;
+    const lower = raw.toLowerCase();
+    return state.valueMappings.some(
+      (m) => m.field === activeMappingField && m.rawValue.trim().toLowerCase() === lower
+    );
+  }, [state.valueMappings, activeMappingField, newMappingRaw]);
 
   const handleAddMapping = () => {
-    if (!newMappingRaw.trim() || !newMappingValue.trim()) return;
-
-    const newMappings = [...state.valueMappings];
-    const existingIndex = newMappings.findIndex(
-      (m) => m.field === mappingField && m.rawValue.toLowerCase() === newMappingRaw.toLowerCase()
-    );
-
-    if (existingIndex >= 0) {
-      newMappings[existingIndex].mappedValue = newMappingValue;
-    } else {
-      newMappings.push({
-        field: mappingField,
-        rawValue: newMappingRaw,
-        mappedValue: newMappingValue,
-      });
-    }
+    const raw = newMappingRaw.trim();
+    if (!raw || !newMappingValue.trim()) return;
+    if (isMappingDuplicate) return;
 
     dispatch({
       type: "SET_VALUE_MAPPINGS",
-      payload: newMappings,
+      payload: [
+        ...state.valueMappings,
+        {
+          field: activeMappingField,
+          rawValue: raw,
+          mappedValue: newMappingValue,
+        },
+      ],
     });
 
     setNewMappingRaw("");
@@ -305,14 +519,19 @@ export function Step2DataCleaning() {
           <div className="space-y-4">
             <div>
               <label className="text-sm font-medium">Feld</label>
-              <Select value={mappingField} onValueChange={(v) => setMappingField(v as typeof mappingField)}>
+              <Select
+                value={activeMappingField}
+                onValueChange={(v) => setMappingField(v as typeof mappingField)}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="kitchen">Küche</SelectItem>
                   <SelectItem value="preference">Ernährungsform</SelectItem>
-                  <SelectItem value="coursePreference">Gericht-Präferenz</SelectItem>
+                  {isCourseColumnMappedHere && (
+                    <SelectItem value="coursePreference">Gericht-Präferenz</SelectItem>
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -323,6 +542,8 @@ export function Step2DataCleaning() {
                   value={newMappingRaw}
                   onChange={(e) => setNewMappingRaw(e.target.value)}
                   placeholder="z.B. ja"
+                  className={isMappingDuplicate ? "border-destructive" : undefined}
+                  aria-invalid={isMappingDuplicate}
                 />
               </div>
               <div>
@@ -332,19 +553,19 @@ export function Step2DataCleaning() {
                     <SelectValue placeholder="Wert auswählen" />
                   </SelectTrigger>
                   <SelectContent>
-                    {mappingField === "kitchen" &&
+                    {activeMappingField === "kitchen" &&
                       kitchenOptions.map((opt) => (
                         <SelectItem key={opt} value={opt}>
                           {opt === "kann_gekocht_werden" ? "bei mir" : opt === "partner_kocht" ? "bei partner" : "nicht"}
                         </SelectItem>
                       ))}
-                    {mappingField === "preference" &&
+                    {activeMappingField === "preference" &&
                       preferenceOptions.map((opt) => (
                         <SelectItem key={opt} value={opt}>
                           {opt}
                         </SelectItem>
                       ))}
-                    {mappingField === "coursePreference" &&
+                    {activeMappingField === "coursePreference" &&
                       courseOptions.map((opt) => (
                         <SelectItem key={opt} value={opt}>
                           {opt}
@@ -354,14 +575,22 @@ export function Step2DataCleaning() {
                 </Select>
               </div>
             </div>
-            <Button onClick={handleAddMapping} disabled={!newMappingRaw.trim() || !newMappingValue.trim()}>
+            {isMappingDuplicate && newMappingRaw.trim() !== "" && (
+              <p className="text-sm text-destructive">
+                Dieser Rohwert ist für dieses Feld bereits vergeben. Zum Ändern den bestehenden Eintrag löschen.
+              </p>
+            )}
+            <Button
+              onClick={handleAddMapping}
+              disabled={!newMappingRaw.trim() || !newMappingValue.trim() || isMappingDuplicate}
+            >
               Mapping hinzufügen
             </Button>
             <div className="space-y-2">
-              <h4 className="font-medium">Aktuelle Mappings für {mappingField}</h4>
+              <h4 className="font-medium">Aktuelle Mappings für {activeMappingField}</h4>
               <div className="space-y-1 max-h-48 overflow-auto">
                 {state.valueMappings
-                  .filter((m) => m.field === mappingField)
+                  .filter((m) => m.field === activeMappingField)
                   .map((mapping, index) => (
                     <div key={index} className="flex items-center justify-between p-2 border rounded">
                       <span className="text-sm">
@@ -386,6 +615,332 @@ export function Step2DataCleaning() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {persons.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Daten-Übersicht</h3>
+          <div className="border rounded-md overflow-auto max-h-96">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Ernährungsform</TableHead>
+                  <TableHead>Unverträglichkeiten</TableHead>
+                  <TableHead>Partner</TableHead>
+                  <TableHead>Küche</TableHead>
+                  <TableHead>Küchen-Adresse</TableHead>
+                  {isCourseColumnMappedHere && <TableHead>Gericht-Präferenz</TableHead>}
+                  {customFieldColumns.map(([fieldId, fieldName]) => (
+                    <TableHead key={fieldId}>{fieldName}</TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {persons.map((person) => {
+                  const nameIssues = getFieldIssues(person.id, "name");
+                  const preferenceIssues = getFieldIssues(person.id, "preference");
+                  const kitchenIssues = getFieldIssues(person.id, "kitchen");
+                  const kitchenAddressIssues = getFieldIssues(person.id, "kitchenAddress");
+                  const courseIssues = isCourseColumnMappedHere
+                    ? getFieldIssues(person.id, "coursePreference")
+                    : [];
+                  const prefMapped = getMappedOnlyPreference(person, state.valueMappings);
+                  const kitMapped = getMappedOnlyKitchen(person, state.valueMappings);
+                  const courseMapped = getMappedOnlyCourse(person, state.valueMappings);
+
+                  return (
+                    <TableRow key={person.id}>
+                      <TableCell>
+                        <TextFieldStack
+                          value={person.name}
+                          original={person.textSnapshot?.name}
+                          editing={editingPersonId === person.id}
+                          input={
+                            <Input
+                              value={person.name}
+                              onChange={(e) => handleUpdatePerson(person.id, "name", e.target.value)}
+                              onBlur={() => setEditingPersonId(null)}
+                              className={nameIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}
+                            />
+                          }
+                          onViewClick={() => setEditingPersonId(person.id)}
+                          errorClassName={
+                            nameIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : undefined
+                          }
+                        />
+                      </TableCell>
+                      <TableCell className={cn(cellErrorClass(preferenceIssues))}>
+                        {editingPersonId === person.id ? (
+                          <div className="flex flex-col gap-1 min-w-[11rem]">
+                            <Select
+                              value={person.preference ?? "placeholder"}
+                              onValueChange={(v) => {
+                                if (v === "placeholder") return;
+                                setPreferenceManual(person.id, v as FoodPreference);
+                              }}
+                              onOpenChange={(open) => !open && setEditingPersonId(null)}
+                            >
+                              <SelectTrigger
+                                className={
+                                  preferenceIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
+                                }
+                              >
+                                <SelectValue placeholder="Gültigen Wert wählen" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="placeholder" disabled>
+                                  Gültigen Wert wählen
+                                </SelectItem>
+                                {preferenceOptions.map((opt) => (
+                                  <SelectItem key={opt} value={opt}>
+                                    {opt}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {person.preferenceManual !== undefined && (
+                              <button
+                                type="button"
+                                className="text-xs text-muted-foreground underline text-left"
+                                onClick={() => clearPreferenceManual(person.id)}
+                              >
+                                Nur Mapping (manuell zurücksetzen)
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            className={
+                              preferenceIssues.some((i) => i.severity === "error")
+                                ? "text-destructive font-medium"
+                                : ""
+                            }
+                            onClick={() => setEditingPersonId(person.id)}
+                            style={{ cursor: "pointer" }}
+                          >
+                            <MappedEnumStack
+                              rawLabel="Aus CSV"
+                              rawValue={person._rawValues?.preference}
+                              mappedValue={prefMapped.value}
+                              mappedSource={prefMapped.source}
+                              manualValue={person.preferenceManual != null ? person.preferenceManual : null}
+                              formatMapped={formatFoodPreferenceLabel}
+                              formatManual={formatFoodPreferenceLabel}
+                            />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <TextFieldStack
+                          value={person.intolerances}
+                          original={person.textSnapshot?.intolerances}
+                          editing={editingPersonId === person.id}
+                          input={
+                            <Input
+                              value={person.intolerances}
+                              onChange={(e) => handleUpdatePerson(person.id, "intolerances", e.target.value)}
+                              onBlur={() => setEditingPersonId(null)}
+                            />
+                          }
+                          onViewClick={() => setEditingPersonId(person.id)}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextFieldStack
+                          value={person.partner ?? ""}
+                          original={person.textSnapshot?.partner}
+                          editing={editingPersonId === person.id}
+                          input={
+                            <Input
+                              value={person.partner || ""}
+                              onChange={(e) =>
+                                handleUpdatePerson(person.id, "partner", e.target.value || undefined)
+                              }
+                              onBlur={() => setEditingPersonId(null)}
+                              placeholder="Partner-Name"
+                            />
+                          }
+                          onViewClick={() => setEditingPersonId(person.id)}
+                        />
+                      </TableCell>
+                      <TableCell className={cn(cellErrorClass(kitchenIssues))}>
+                        {editingPersonId === person.id ? (
+                          <div className="flex flex-col gap-1 min-w-[11rem]">
+                            <Select
+                              value={person.kitchen ?? "placeholder"}
+                              onValueChange={(v) => {
+                                if (v === "placeholder") return;
+                                setKitchenManual(person.id, v as KitchenStatus);
+                              }}
+                              onOpenChange={(open) => !open && setEditingPersonId(null)}
+                            >
+                              <SelectTrigger
+                                className={
+                                  kitchenIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
+                                }
+                              >
+                                <SelectValue placeholder="Gültigen Wert wählen" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="placeholder" disabled>
+                                  Gültigen Wert wählen
+                                </SelectItem>
+                                {kitchenOptions.map((opt) => (
+                                  <SelectItem key={opt} value={opt}>
+                                    {opt === "kann_gekocht_werden"
+                                      ? "bei mir"
+                                      : opt === "partner_kocht"
+                                        ? "bei partner"
+                                        : "nicht"}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                            {person.kitchenManual !== undefined && (
+                              <button
+                                type="button"
+                                className="text-xs text-muted-foreground underline text-left"
+                                onClick={() => clearKitchenManual(person.id)}
+                              >
+                                Nur Mapping (manuell zurücksetzen)
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div
+                            className={
+                              kitchenIssues.some((i) => i.severity === "error")
+                                ? "text-destructive font-medium"
+                                : ""
+                            }
+                            onClick={() => setEditingPersonId(person.id)}
+                            style={{ cursor: "pointer" }}
+                          >
+                            <MappedEnumStack
+                              rawLabel="Aus CSV"
+                              rawValue={person._rawValues?.kitchen}
+                              mappedValue={kitMapped.value}
+                              mappedSource={kitMapped.source}
+                              manualValue={person.kitchenManual != null ? person.kitchenManual : null}
+                              formatMapped={formatKitchenLabel}
+                              formatManual={formatKitchenLabel}
+                            />
+                          </div>
+                        )}
+                      </TableCell>
+                      <TableCell className={cn(cellErrorClass(kitchenAddressIssues))}>
+                        <TextFieldStack
+                          value={person.kitchenAddress}
+                          original={person.textSnapshot?.kitchenAddress}
+                          editing={editingPersonId === person.id}
+                          input={
+                            <Input
+                              value={person.kitchenAddress}
+                              onChange={(e) => handleUpdatePerson(person.id, "kitchenAddress", e.target.value)}
+                              onBlur={() => setEditingPersonId(null)}
+                              className={
+                                kitchenAddressIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
+                              }
+                            />
+                          }
+                          onViewClick={() => setEditingPersonId(person.id)}
+                          errorClassName={
+                            kitchenAddressIssues.some((i) => i.severity === "error")
+                              ? "text-destructive font-medium"
+                              : undefined
+                          }
+                        />
+                      </TableCell>
+                      {isCourseColumnMappedHere && (
+                        <TableCell className={cn(cellErrorClass(courseIssues))}>
+                          {editingPersonId === person.id ? (
+                            <div className="flex flex-col gap-1 min-w-[11rem]">
+                              <Select
+                                value={person.coursePreference ?? "placeholder"}
+                                onValueChange={(v) => {
+                                  if (v === "placeholder") return;
+                                  setCourseManual(person.id, v as CoursePreference);
+                                }}
+                                onOpenChange={(open) => !open && setEditingPersonId(null)}
+                              >
+                                <SelectTrigger
+                                  className={
+                                    courseIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
+                                  }
+                                >
+                                  <SelectValue placeholder="Gültigen Wert wählen" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="placeholder" disabled>
+                                    Gültigen Wert wählen
+                                  </SelectItem>
+                                  {courseOptions.map((opt) => (
+                                    <SelectItem key={opt} value={opt}>
+                                      {opt}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {person.coursePreferenceManual !== undefined && (
+                                <button
+                                  type="button"
+                                  className="text-xs text-muted-foreground underline text-left"
+                                  onClick={() => clearCourseManual(person.id)}
+                                >
+                                  Nur Mapping (manuell zurücksetzen)
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div
+                              className={
+                                courseIssues.some((i) => i.severity === "error")
+                                  ? "text-destructive font-medium"
+                                  : ""
+                              }
+                              onClick={() => setEditingPersonId(person.id)}
+                              style={{ cursor: "pointer" }}
+                            >
+                              <MappedEnumStack
+                                rawLabel="Aus CSV"
+                                rawValue={person._rawValues?.coursePreference}
+                                mappedValue={courseMapped.value}
+                                mappedSource={courseMapped.source}
+                                manualValue={
+                                  person.coursePreferenceManual != null ? person.coursePreferenceManual : null
+                                }
+                                formatMapped={formatCourseLabel}
+                                formatManual={formatCourseLabel}
+                              />
+                            </div>
+                          )}
+                        </TableCell>
+                      )}
+                      {customFieldColumns.map(([fieldId]) => (
+                        <TableCell key={fieldId}>
+                          <TextFieldStack
+                            value={person.customFieldValues?.[fieldId] ?? ""}
+                            original={person.textSnapshot?.custom?.[fieldId]}
+                            editing={editingPersonId === person.id}
+                            input={
+                              <Input
+                                value={person.customFieldValues?.[fieldId] ?? ""}
+                                onChange={(e) => handleUpdateCustomField(person.id, fieldId, e.target.value)}
+                                onBlur={() => setEditingPersonId(null)}
+                              />
+                            }
+                            onViewClick={() => setEditingPersonId(person.id)}
+                          />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      )}
 
       {issues.length > 0 && (
         <div className="space-y-4">
@@ -417,226 +972,13 @@ export function Step2DataCleaning() {
         </div>
       )}
 
-      {persons.length > 0 && (
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Daten-Übersicht</h3>
-          <div className="border rounded-md overflow-auto max-h-96">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Ernährungsform</TableHead>
-                  <TableHead>Unverträglichkeiten</TableHead>
-                  <TableHead>Partner</TableHead>
-                  <TableHead>Küche</TableHead>
-                  <TableHead>Küchen-Adresse</TableHead>
-                  <TableHead>Gericht-Präferenz</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {persons.map((person) => {
-                  const nameIssues = getFieldIssues(person.id, "name");
-                  const preferenceIssues = getFieldIssues(person.id, "preference");
-                  const kitchenIssues = getFieldIssues(person.id, "kitchen");
-                  const kitchenAddressIssues = getFieldIssues(person.id, "kitchenAddress");
-                  const courseIssues = getFieldIssues(person.id, "coursePreference");
-
-                  return (
-                    <TableRow key={person.id}>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Input
-                            value={person.name}
-                            onChange={(e) => handleUpdatePerson(person.id, "name", e.target.value)}
-                            onBlur={() => setEditingPersonId(null)}
-                            className={nameIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}
-                          />
-                        ) : (
-                          <span
-                            className={nameIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : ""}
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                          >
-                            {person.name}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Select
-                            value={person.preference}
-                            onValueChange={(v) => handleUpdatePerson(person.id, "preference", v)}
-                            onOpenChange={(open) => !open && setEditingPersonId(null)}
-                          >
-                            <SelectTrigger className={preferenceIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {preferenceOptions.map((opt) => (
-                                <SelectItem key={opt} value={opt}>
-                                  {opt}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <span
-                            className={preferenceIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : ""}
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                            title={person._rawValues?.preference && person._rawValues.preference !== person.preference ? `Ursprünglich: ${person._rawValues.preference}` : ""}
-                          >
-                            {person._rawValues?.preference && !hasMapping("preference", person._rawValues.preference)
-                             ? person._rawValues.preference 
-                             : person.preference}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Input
-                            value={person.intolerances}
-                            onChange={(e) => handleUpdatePerson(person.id, "intolerances", e.target.value)}
-                            onBlur={() => setEditingPersonId(null)}
-                          />
-                        ) : (
-                          <span
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                          >
-                            {person.intolerances}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {(() => {
-                          // Finde Partner aus Teams
-                          const team = state.teams.find(
-                            (t) => t.person1Id === person.id || t.person2Id === person.id
-                          );
-                          const partnerId = team
-                            ? team.person1Id === person.id
-                              ? team.person2Id
-                              : team.person1Id
-                            : null;
-                          const partner = partnerId
-                            ? state.persons.find((p) => p.id === partnerId)
-                            : null;
-                          const partnerName = partner?.name || person.partner || "-";
-
-                          return editingPersonId === person.id ? (
-                            <Input
-                              value={person.partner || ""}
-                              onChange={(e) => handleUpdatePerson(person.id, "partner", e.target.value || undefined)}
-                              onBlur={() => setEditingPersonId(null)}
-                              placeholder="Partner-Name"
-                            />
-                          ) : (
-                            <span
-                              onClick={() => setEditingPersonId(person.id)}
-                              style={{ cursor: "pointer" }}
-                            >
-                              {partnerName}
-                            </span>
-                          );
-                        })()}
-                      </TableCell>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Select
-                            value={person.kitchen}
-                            onValueChange={(v) => handleUpdatePerson(person.id, "kitchen", v)}
-                            onOpenChange={(open) => !open && setEditingPersonId(null)}
-                          >
-                            <SelectTrigger className={kitchenIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {kitchenOptions.map((opt) => (
-                                <SelectItem key={opt} value={opt}>
-                                  {opt === "kann_gekocht_werden" ? "bei mir" : opt === "partner_kocht" ? "bei partner" : "nicht"}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <span
-                            className={kitchenIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : ""}
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                            title={person._rawValues?.kitchen && person._rawValues.kitchen !== person.kitchen ? `Ursprünglich: ${person._rawValues.kitchen}` : ""}
-                          >
-                            {person._rawValues?.kitchen && !hasMapping("kitchen", person._rawValues.kitchen)
-                             ? person._rawValues.kitchen 
-                             : person.kitchen === "kann_gekocht_werden" ? "bei mir" : person.kitchen === "partner_kocht" ? "bei partner" : "nicht"}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Input
-                            value={person.kitchenAddress}
-                            onChange={(e) => handleUpdatePerson(person.id, "kitchenAddress", e.target.value)}
-                            onBlur={() => setEditingPersonId(null)}
-                            className={kitchenAddressIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}
-                          />
-                        ) : (
-                          <span
-                            className={kitchenAddressIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : ""}
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                          >
-                            {person.kitchenAddress}
-                          </span>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        {editingPersonId === person.id ? (
-                          <Select
-                            value={person.coursePreference || "keine"}
-                            onValueChange={(v) => handleUpdatePerson(person.id, "coursePreference", v === "keine" ? undefined : v)}
-                            onOpenChange={(open) => !open && setEditingPersonId(null)}
-                          >
-                            <SelectTrigger className={courseIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {courseOptions.map((opt) => (
-                                <SelectItem key={opt} value={opt}>
-                                  {opt}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <span
-                            className={courseIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : ""}
-                            onClick={() => setEditingPersonId(person.id)}
-                            style={{ cursor: "pointer" }}
-                            title={person._rawValues?.coursePreference && person._rawValues.coursePreference !== person.coursePreference ? `Ursprünglich: ${person._rawValues.coursePreference}` : ""}
-                          >
-                            {person._rawValues?.coursePreference && !hasMapping("coursePreference", person._rawValues.coursePreference)
-                             ? person._rawValues.coursePreference 
-                             : person.coursePreference || "-"}
-                          </span>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-      )}
-
-      <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
         <div className="flex items-center gap-2">
           {errorCount === 0 ? (
             <>
               <CheckCircle2 className="h-5 w-5 text-green-600" />
               <span className="text-sm text-muted-foreground">
-                Keine Fehler gefunden. Daten können bestätigt werden.
+                Keine Fehler gefunden.
               </span>
             </>
           ) : (
@@ -645,12 +987,6 @@ export function Step2DataCleaning() {
             </span>
           )}
         </div>
-        <Button
-          onClick={handleConfirm}
-          disabled={errorCount > 0 || persons.length === 0}
-        >
-          Daten bestätigen und weiter
-        </Button>
       </div>
     </div>
   );

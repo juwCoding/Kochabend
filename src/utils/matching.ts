@@ -74,36 +74,63 @@ export function findDuplicateAddresses(persons: Person[]): Array<{ address: stri
     .map(([address, persons]) => ({ address, persons }));
 }
 
-// Validate preference consistency
-export function validatePreferences(persons: Person[]): Array<{ person: Person; issue: string }> {
+const VALID_PREF = ["vegan", "vegetarisch", "egal"] as const;
+const VALID_KITCHEN = [
+  "kann_gekocht_werden",
+  "partner_kocht",
+  "kann_nicht_gekocht_werden",
+] as const;
+const VALID_COURSE = ["keine", "Vorspeise", "Hauptgang", "Nachspeise"] as const;
+
+/** Gericht-Präferenz nur, wenn die Spalte in Schritt 1 zugeordnet wurde. */
+export function isCourseColumnMapped(columnMapping: Record<string, string>): boolean {
+  return Object.values(columnMapping).includes("coursePreference");
+}
+
+// Validate preference consistency (Schritt 2)
+export function validatePreferences(
+  persons: Person[],
+  columnMapping: Record<string, string> = {}
+): Array<{ person: Person; issue: string }> {
   const issues: Array<{ person: Person; issue: string }> = [];
+  const validateCourse = isCourseColumnMapped(columnMapping);
 
   for (const person of persons) {
-    // Check if preference values are valid
-    if (!["vegan", "vegetarisch", "egal"].includes(person.preference)) {
+    const rawPref = person._rawValues?.preference;
+    if (!person.preference || !VALID_PREF.includes(person.preference as (typeof VALID_PREF)[number])) {
       issues.push({
         person,
-        issue: `Ungültige Ernährungsform: ${person.preference}`,
+        issue: `Ernährungsform: Kein gültiger Wert (Mapping oder manuell). Aus CSV: "${rawPref ?? ""}"`,
       });
     }
 
-    // Check if kitchen status is valid
-    if (!["kann_gekocht_werden", "partner_kocht", "kann_nicht_gekocht_werden"].includes(person.kitchen)) {
+    const rawKit = person._rawValues?.kitchen;
+    if (!person.kitchen || !VALID_KITCHEN.includes(person.kitchen as (typeof VALID_KITCHEN)[number])) {
       issues.push({
         person,
-        issue: `Ungültiger Küche-Status: ${person.kitchen}`,
+        issue: `Küche: Kein gültiger Wert (Mapping oder manuell). Aus CSV: "${rawKit ?? ""}"`,
       });
     }
 
-    // Check if course preference is valid (optional)
-    if (person.coursePreference && !["keine", "Vorspeise", "Hauptgang", "Nachspeise"].includes(person.coursePreference)) {
-      issues.push({
-        person,
-        issue: `Ungültige Gericht-Präferenz: ${person.coursePreference}`,
-      });
+    if (validateCourse) {
+      const rawCourse = person._rawValues?.coursePreference;
+      if (
+        !person.coursePreference ||
+        !VALID_COURSE.includes(person.coursePreference as (typeof VALID_COURSE)[number])
+      ) {
+        issues.push({
+          person,
+          issue: `Gericht-Präferenz: Kein gültiger Wert (Mapping oder manuell). Aus CSV: "${rawCourse ?? ""}"`,
+        });
+      }
     }
   }
 
   return issues;
+}
+
+export function isStep2Valid(persons: Person[], columnMapping: Record<string, string> = {}): boolean {
+  if (persons.length === 0) return false;
+  return validatePreferences(persons, columnMapping).length === 0;
 }
 

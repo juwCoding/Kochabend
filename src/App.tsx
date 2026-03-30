@@ -9,6 +9,8 @@ import { Step4Distribution } from "@/components/steps/Step4Distribution";
 import { Step5Invitations } from "@/components/steps/Step5Invitations";
 import { Undo2, Redo2, Download, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { isStep2Valid } from "@/utils/matching";
+import { clampWizardStepIndex } from "@/types/models";
 
 const STEPS = [
   { title: "CSV Import", component: Step1CSVImport },
@@ -21,9 +23,13 @@ const STEPS = [
 const REQUIRED_FIELDS: Array<keyof typeof import("@/types/models").COLUMN_FIELDS> = ["name", "preference", "intolerances", "kitchen", "kitchenAddress"];
 
 function AppContent() {
-  const { state, undo, redo, canUndo, canRedo, exportState, importState } = useAppState();
-  const [currentStep, setCurrentStep] = useState(0);
+  const { state, dispatch, undo, redo, canUndo, canRedo, exportState, importState } = useAppState();
   const [isImporting, setIsImporting] = useState(false);
+
+  const currentStep = clampWizardStepIndex(state.currentStep);
+  const setCurrentStep = (step: number) => {
+    dispatch({ type: "SET_CURRENT_STEP", payload: step });
+  };
 
   // Check if step 1 is complete (all required fields mapped)
   const isStep1Complete = () => {
@@ -128,7 +134,13 @@ function AppContent() {
             currentStep={currentStep}
             totalSteps={STEPS.length}
             onStepChange={setCurrentStep}
-            canProceed={currentStep === 0 ? isStep1Complete() : true}
+            canProceed={
+              currentStep === 0
+                ? isStep1Complete()
+                : currentStep === 1
+                  ? isStep2Valid(state.persons, state.columnMapping)
+                  : true
+            }
           >
             <CurrentStepComponent />
           </Wizard>
