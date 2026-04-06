@@ -130,7 +130,7 @@ export const initialAppState: AppState = {
   csvData: [],
   csvRawData: [],
   columnMapping: {},
-  hasHeader: false,
+  hasHeader: true,
   customFields: {},
   valueMappings: [],
   persons: [],

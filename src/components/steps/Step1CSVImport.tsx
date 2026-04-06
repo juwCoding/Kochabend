@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,13 +23,6 @@ export function Step1CSVImport() {
   const previewData = state.csvRawData.length > 0 ? state.csvRawData : [];
   const hasHeader = state.hasHeader;
 
-  // Load data from state on mount
-  useEffect(() => {
-    if (state.csvRawData.length > 0) {
-      // Data already loaded from state
-    }
-  }, []);
-
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -46,7 +39,7 @@ export function Step1CSVImport() {
       }
 
       dispatch({ type: "RESET" });
-      nextHasHeader = false;
+      nextHasHeader = true;
     }
 
     setError(null);
@@ -55,10 +48,11 @@ export function Step1CSVImport() {
     parseCSVFile(file, {
       hasHeader: false,
       onComplete: (data) => {
+        const normalizedCsvData = nextHasHeader && data.length > 0 ? data.slice(1) : data;
         dispatch({
           type: "SET_CSV_DATA",
           payload: {
-            csvData: nextHasHeader && data.length > 0 ? data.slice(1) : data,
+            csvData: normalizedCsvData,
             csvRawData: data,
             hasHeader: nextHasHeader,
           },
@@ -75,8 +69,6 @@ export function Step1CSVImport() {
   };
 
   const handleHeaderToggle = (checked: boolean) => {
-    if (previewData.length === 0) return;
-    
     const newHasHeader = checked;
     dispatch({
       type: "SET_CSV_DATA",
@@ -222,7 +214,7 @@ export function Step1CSVImport() {
               type="checkbox"
               checked={hasHeader}
               onChange={(e) => handleHeaderToggle(e.target.checked)}
-              disabled={previewData.length === 0}
+              disabled={isProcessing}
             />
             <span>Erste Zeile ist Header</span>
           </label>

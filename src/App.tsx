@@ -73,14 +73,15 @@ function AppContent() {
 
   const CurrentStepComponent = STEPS[currentStep].component;
 
+  const step1Done = isStep1Complete();
+  const step2Done = isStep2Valid(state.persons, state.columnMapping);
+  const maxReachableStep = !step1Done ? 0 : !step2Done ? 1 : STEPS.length - 1;
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8 max-w-7xl">
         <div className="mb-6">
-          <h1 className="text-4xl font-bold mb-2">Kochabend Organizer</h1>
-          <p className="text-muted-foreground">
-            Organisieren Sie Ihren Kochabend in einfachen Schritten
-          </p>
+          <h1 className="text-4xl font-bold mb-2">Schnitzi kocht</h1>
         </div>
 
         {/* Toolbar */}
@@ -133,12 +134,13 @@ function AppContent() {
           <Wizard
             currentStep={currentStep}
             totalSteps={STEPS.length}
+            maxReachableStep={maxReachableStep}
             onStepChange={setCurrentStep}
             canProceed={
               currentStep === 0
-                ? isStep1Complete()
+                ? step1Done
                 : currentStep === 1
-                  ? isStep2Valid(state.persons, state.columnMapping)
+                  ? step2Done
                   : true
             }
           >

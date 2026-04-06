@@ -38,6 +38,7 @@ function hydrateAppStateShape(base: AppState): AppState {
       typeof base.currentStep === "number" ? base.currentStep : 0
     ),
     valueMappings: hydrateValueMappingsIfEmpty(base.valueMappings),
+    hasHeader: typeof base.hasHeader === "boolean" ? base.hasHeader : true,
   };
 }
 

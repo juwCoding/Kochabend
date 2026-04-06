@@ -5,8 +5,15 @@ import { viteSingleFile } from 'vite-plugin-singlefile'
 import path from 'path'
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), viteSingleFile({ removeViteModuleLoader: true })],
+// Single-file plugin only for build — its config hook is unsafe for `vite serve` (HMR / base).
+export default defineConfig(({ command }) => ({
+  plugins: [
+    react(),
+    tailwindcss(),
+    ...(command === 'build'
+      ? [viteSingleFile({ removeViteModuleLoader: true })]
+      : []),
+  ],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
@@ -24,5 +31,5 @@ export default defineConfig({
     // Increase chunk size warning limit since we want a single bundle
     chunkSizeWarningLimit: 1000,
   },
-  base: './', // Use relative paths for offline compatibility
-})
+  base: command === 'build' ? './' : '/',
+}))

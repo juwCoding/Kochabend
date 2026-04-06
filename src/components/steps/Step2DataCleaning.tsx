@@ -10,6 +10,7 @@ import type { Person } from "@/types/models";
 import {
   findSimilarNames,
   findDuplicateAddresses,
+  calculateSimilarity,
   isCourseColumnMapped,
   validatePreferences,
 } from "@/utils/matching";
@@ -23,7 +24,12 @@ import {
   mappingSourceLabel,
   recomputeEffectiveFields,
 } from "@/utils/valueResolution";
-import { AlertCircle, CheckCircle2, Settings } from "lucide-react";
+import {
+  computeMappingSuggestions,
+  type MappingSuggestion,
+  type SuggestionField,
+} from "@/utils/mappingSuggestions";
+import { AlertCircle, CheckCircle2, ChevronDown, Settings } from "lucide-react";
 import type { FoodPreference, KitchenStatus, CoursePreference } from "@/types/models";
 import { cn } from "@/lib/utils";
 
@@ -44,6 +50,54 @@ function cellErrorClass(issues: DataIssue[]): string {
 
 function normText(s: string | undefined): string {
   return (s ?? "").trim();
+}
+
+function normalizeSuggestionText(s: string): string {
+  return s.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function rankRawSuggestions(query: string, candidates: string[], limit = 8): string[] {
+  const q = normalizeSuggestionText(query);
+  if (!q) return [...candidates].sort((a, b) => a.localeCompare(b, "de")).slice(0, limit);
+
+  if (q.length === 1) {
+    const withChar = candidates
+      .map((candidate) => {
+        const normCandidate = normalizeSuggestionText(candidate);
+        const index = normCandidate.indexOf(q);
+        const starts = index === 0 ? 1 : 0;
+        return { candidate, index, starts };
+      })
+      .filter((entry) => entry.index >= 0)
+      .sort((a, b) => {
+        if (b.starts !== a.starts) return b.starts - a.starts;
+        if (a.index !== b.index) return a.index - b.index;
+        return a.candidate.localeCompare(b.candidate, "de");
+      })
+      .slice(0, limit)
+      .map((entry) => entry.candidate);
+
+    return withChar;
+  }
+
+  const ranked = candidates
+    .map((candidate) => {
+      const normCandidate = normalizeSuggestionText(candidate);
+      const similarity = calculateSimilarity(q, normCandidate);
+      const starts = normCandidate.startsWith(q) ? 1 : 0;
+      const includes = !starts && normCandidate.includes(q) ? 1 : 0;
+      const score = similarity + starts * 0.25 + includes * 0.12;
+      return { candidate, score };
+    })
+    .filter((entry) => entry.score >= 0.28)
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.candidate.localeCompare(b.candidate, "de");
+    })
+    .slice(0, limit)
+    .map((entry) => entry.candidate);
+
+  return ranked;
 }
 
 /** Nur custom_*-Spalten aus CSV; Zeilenindex = Personenindex. */
@@ -208,6 +262,7 @@ export function Step2DataCleaning() {
   const [mappingField, setMappingField] = useState<"kitchen" | "preference" | "coursePreference">("kitchen");
   const [newMappingRaw, setNewMappingRaw] = useState("");
   const [newMappingValue, setNewMappingValue] = useState("");
+  const [isRawSuggestionsOpen, setIsRawSuggestionsOpen] = useState(false);
 
   const isCourseColumnMappedHere = useMemo(
     () => isCourseColumnMapped(state.columnMapping),
@@ -430,6 +485,49 @@ export function Step2DataCleaning() {
     commitPersons(next);
   };
 
+  const mappingSuggestions = useMemo(
+    () =>
+      computeMappingSuggestions(persons, state.valueMappings, {
+        includeCourse: isCourseColumnMappedHere,
+      }),
+    [persons, state.valueMappings, isCourseColumnMappedHere]
+  );
+
+  const loadedRawCandidates = useMemo(() => {
+    const values = new Set<string>();
+    for (const p of persons) {
+      const raw =
+        activeMappingField === "preference"
+          ? p._rawValues?.preference
+          : activeMappingField === "kitchen"
+            ? p._rawValues?.kitchen
+            : p._rawValues?.coursePreference;
+      const trimmed = (raw ?? "").trim();
+      if (trimmed) values.add(trimmed);
+    }
+    return [...values];
+  }, [persons, activeMappingField]);
+
+  const existingMappedRawsForField = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of state.valueMappings) {
+      if (m.field !== activeMappingField) continue;
+      set.add(normalizeSuggestionText(m.rawValue));
+    }
+    return set;
+  }, [state.valueMappings, activeMappingField]);
+
+  const filteredRawCandidates = useMemo(
+    () =>
+      rankRawSuggestions(
+        newMappingRaw,
+        loadedRawCandidates.filter(
+          (candidate) => !existingMappedRawsForField.has(normalizeSuggestionText(candidate))
+        )
+      ),
+    [newMappingRaw, loadedRawCandidates, existingMappedRawsForField]
+  );
+
   const isMappingDuplicate = useMemo(() => {
     const raw = newMappingRaw.trim();
     if (!raw) return false;
@@ -458,6 +556,7 @@ export function Step2DataCleaning() {
 
     setNewMappingRaw("");
     setNewMappingValue("");
+    setIsRawSuggestionsOpen(false);
   };
 
   const handleDeleteMapping = (index: number) => {
@@ -467,6 +566,42 @@ export function Step2DataCleaning() {
       type: "SET_VALUE_MAPPINGS",
       payload: newMappings,
     });
+  };
+
+  const applySuggestion = (s: MappingSuggestion) => {
+    const raw = s.rawValue.trim();
+    const lower = raw.toLowerCase();
+    if (state.valueMappings.some((m) => m.field === s.field && m.rawValue.trim().toLowerCase() === lower)) {
+      return;
+    }
+    dispatch({
+      type: "SET_VALUE_MAPPINGS",
+      payload: [
+        ...state.valueMappings,
+        {
+          field: s.field,
+          rawValue: raw,
+          mappedValue: s.suggestedMappedValue,
+        },
+      ],
+    });
+  };
+
+  const suggestionFieldLabel = (f: SuggestionField) => {
+    switch (f) {
+      case "kitchen":
+        return "Küche";
+      case "preference":
+        return "Ernährungsform";
+      case "coursePreference":
+        return "Gericht-Präferenz";
+    }
+  };
+
+  const formatSuggestedMapped = (f: SuggestionField, v: string) => {
+    if (f === "kitchen") return formatKitchenLabel(v);
+    if (f === "preference") return formatFoodPreferenceLabel(v);
+    return formatCourseLabel(v);
   };
 
   const getFieldIssues = (personId: string, field: string): DataIssue[] => {
@@ -538,13 +673,46 @@ export function Step2DataCleaning() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="text-sm font-medium">Rohwert (aus CSV)</label>
-                <Input
-                  value={newMappingRaw}
-                  onChange={(e) => setNewMappingRaw(e.target.value)}
-                  placeholder="z.B. ja"
-                  className={isMappingDuplicate ? "border-destructive" : undefined}
-                  aria-invalid={isMappingDuplicate}
-                />
+                <div className="relative">
+                  <Input
+                    value={newMappingRaw}
+                    onChange={(e) => {
+                      setNewMappingRaw(e.target.value);
+                      setIsRawSuggestionsOpen(true);
+                    }}
+                    onFocus={() => setIsRawSuggestionsOpen(true)}
+                    onClick={() => setIsRawSuggestionsOpen(true)}
+                    onBlur={() => {
+                      window.setTimeout(() => setIsRawSuggestionsOpen(false), 120);
+                    }}
+                    placeholder="z.B. ja"
+                    className={isMappingDuplicate ? "border-destructive" : undefined}
+                    aria-invalid={isMappingDuplicate}
+                    aria-expanded={isRawSuggestionsOpen}
+                    aria-haspopup="listbox"
+                  />
+                  {isRawSuggestionsOpen && filteredRawCandidates.length > 0 && (
+                    <div
+                      className="absolute z-20 mt-1 max-h-48 w-full overflow-auto rounded-md border bg-popover shadow-md"
+                      role="listbox"
+                    >
+                      {filteredRawCandidates.map((candidate) => (
+                        <button
+                          key={candidate}
+                          type="button"
+                          className="w-full px-3 py-2 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            setNewMappingRaw(candidate);
+                            setIsRawSuggestionsOpen(false);
+                          }}
+                        >
+                          {candidate}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
               <div>
                 <label className="text-sm font-medium">Zugeordneter Wert</label>
@@ -586,6 +754,53 @@ export function Step2DataCleaning() {
             >
               Mapping hinzufügen
             </Button>
+
+            <details className="group rounded-md border bg-muted/30">
+              <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
+                <ChevronDown className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+                <span>
+                  Vorschläge
+                  {mappingSuggestions.length > 0 && (
+                    <span className="ml-2 font-normal text-muted-foreground">
+                      ({mappingSuggestions.length})
+                    </span>
+                  )}
+                </span>
+              </summary>
+              <div className="space-y-2 border-t px-3 py-2 text-sm">
+                <p className="text-muted-foreground leading-snug">
+                  Rohwerte aus den drei Zuordnungs-Spalten und aus Textfeldern werden mit gültigen Werten und
+                  Standard-Synonymen verglichen. Übernehmen fügt ein Mapping wie bei „Mapping hinzufügen“ hinzu.
+                </p>
+                {mappingSuggestions.length === 0 ? (
+                  <p className="text-muted-foreground italic">Keine Vorschläge für die aktuellen Daten.</p>
+                ) : (
+                  <ul className="max-h-52 space-y-2 overflow-auto pr-1">
+                    {mappingSuggestions.map((s, i) => (
+                      <li
+                        key={`${s.field}-${normText(s.rawValue)}-${i}`}
+                        className="flex flex-wrap items-center justify-between gap-2 rounded border bg-background p-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-foreground">
+                            {suggestionFieldLabel(s.field)}: „{s.rawValue}“ →{" "}
+                            {formatSuggestedMapped(s.field, s.suggestedMappedValue)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {s.source === "enum_column" ? "Aus CSV-Zuordnungsspalte" : "Aus Textfeld"} · Treffer
+                            ca. {Math.round(s.score * 100)}%
+                          </div>
+                        </div>
+                        <Button type="button" size="sm" variant="secondary" onClick={() => applySuggestion(s)}>
+                          Übernehmen
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </details>
+
             <div className="space-y-2">
               <h4 className="font-medium">Aktuelle Mappings für {activeMappingField}</h4>
               <div className="space-y-1 max-h-48 overflow-auto">
