@@ -3,7 +3,8 @@ import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { getAvailablePlaceholders, generateAllInvitations, replacePlaceholders } from "@/utils/templateEngine";
-import { FileText, Download } from "lucide-react";
+import { downloadTeamInvitationsPdf } from "@/utils/invitationPdf";
+import { FileText, Download, FileDown } from "lucide-react";
 
 // Textarea component
 function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -115,6 +116,15 @@ export function Step5Invitations() {
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadPdf = () => {
+    downloadTeamInvitationsPdf(
+      state.teams,
+      state.persons,
+      generatedInvitations,
+      "einladungen_teams.pdf"
+    );
+  };
+
   const insertPlaceholder = (placeholder: string) => {
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     if (textarea) {
@@ -205,10 +215,22 @@ export function Step5Invitations() {
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Generierte Einladungen</h3>
             {Object.keys(generatedInvitations).length > 0 && (
-              <Button variant="outline" size="sm" onClick={handleDownloadAll}>
-                <Download className="mr-2 h-4 w-4" />
-                Alle herunterladen
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadPdf}
+                  disabled={state.teams.length === 0}
+                  title={state.teams.length === 0 ? "Keine Teams vorhanden" : undefined}
+                >
+                  <FileDown className="mr-2 h-4 w-4" />
+                  PDF
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleDownloadAll}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Alle herunterladen
+                </Button>
+              </div>
             )}
           </div>
 
