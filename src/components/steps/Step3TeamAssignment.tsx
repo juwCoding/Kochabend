@@ -7,22 +7,12 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import type { Team, FoodPreference } from "@/types/models";
 import { Users, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { categorizePartnerFields } from "@/utils/partnerSuggestions";
-
-function hasUsableKitchen(personKitchen?: string): boolean {
-  return personKitchen === "kann_gekocht_werden" || personKitchen === "partner_kocht";
-}
-
-function preferenceRank(preference?: FoodPreference): number {
-  if (preference === "vegan") return 3;
-  if (preference === "vegetarisch") return 2;
-  return 1; // egal oder fehlend
-}
-
-function combinePreference(person1Preference?: FoodPreference, person2Preference?: FoodPreference): FoodPreference {
-  const p1 = person1Preference ?? "egal";
-  const p2 = person2Preference ?? "egal";
-  return preferenceRank(p1) >= preferenceRank(p2) ? p1 : p2;
-}
+import {
+  combinePreference,
+  hasUsableKitchen,
+  preferenceRank,
+  getTeamKitchenOptions,
+} from "@/utils/teamDerived";
 
 function teamPersonIdSet(teams: { person1Id: string; person2Id: string }[]): Set<string> {
   return new Set(teams.flatMap((t) => [t.person1Id, t.person2Id]));
@@ -35,8 +25,7 @@ interface TeamWithDetails {
   team: Team;
   person1?: { name?: string };
   person2?: { name?: string };
-  kitchen?: { address: string };
-  secondaryKitchen?: { address: string };
+  kitchenOptions: string[];
   chosenPreference: FoodPreference;
   preferenceNote: string | null;
 }
@@ -48,8 +37,7 @@ function sortComparableForTeamColumn(team: TeamWithDetails, key: TeamTableSortKe
     case "person2":
       return (team.person2?.name ?? "").trim();
     case "kitchen":
-      return `${team.kitchen?.address ?? team.team.kitchenId ?? ""} ${team.secondaryKitchen?.address ?? ""}`
-        .trim();
+      return team.kitchenOptions.join(" ");
     case "preference":
       return `${team.chosenPreference} ${team.preferenceNote ?? ""}`.trim();
     default:
@@ -127,27 +115,11 @@ export function Step3TeamAssignment() {
     return state.persons.filter((p) => !teamPersonIds.has(p.id));
   }, [state.persons, teamPersonIds]);
 
-  const kitchens = useMemo(() => {
-    const kitchenMap = new Map<string, { id: string; address: string }>();
-    for (const person of state.persons) {
-      if (!kitchenMap.has(person.kitchenAddress)) {
-        kitchenMap.set(person.kitchenAddress, {
-          id: person.kitchenAddress,
-          address: person.kitchenAddress,
-        });
-      }
-    }
-    return Array.from(kitchenMap.values());
-  }, [state.persons]);
-
   const teamsWithDetails = useMemo(() => {
     return state.teams.map((team) => {
       const person1 = state.persons.find((p) => p.id === team.person1Id);
       const person2 = state.persons.find((p) => p.id === team.person2Id);
-      const kitchen = kitchens.find((k) => k.id === team.kitchenId);
-      const secondaryKitchen = team.secondaryKitchenId
-        ? kitchens.find((k) => k.id === team.secondaryKitchenId)
-        : undefined;
+      const kitchenOptions = getTeamKitchenOptions(team, state.persons);
 
       const person1Preference = person1?.preference ?? "egal";
       const person2Preference = person2?.preference ?? "egal";
@@ -163,13 +135,12 @@ export function Step3TeamAssignment() {
         team,
         person1,
         person2,
-        kitchen,
-        secondaryKitchen,
+        kitchenOptions,
         chosenPreference,
         preferenceNote,
       };
     });
-  }, [state.teams, state.persons, kitchens]);
+  }, [state.teams, state.persons]);
 
   const sortedTeamsWithDetails = useMemo(() => {
     if (teamSortSpecs.length === 0) return teamsWithDetails;
@@ -233,26 +204,10 @@ export function Step3TeamAssignment() {
 
     if (!person1 || !person2) return;
 
-    const availableKitchenIds: string[] = [];
-    if (hasUsableKitchen(person1.kitchen) && person1.kitchenAddress) {
-      availableKitchenIds.push(person1.kitchenAddress);
-    }
-    if (hasUsableKitchen(person2.kitchen) && person2.kitchenAddress) {
-      availableKitchenIds.push(person2.kitchenAddress);
-    }
-    const uniqueKitchenIds = Array.from(new Set(availableKitchenIds));
-    const kitchenId = uniqueKitchenIds[0] ?? person1.kitchenAddress ?? person2.kitchenAddress ?? "";
-    const secondaryKitchenId = uniqueKitchenIds[1];
-
-    const preference = combinePreference(person1.preference, person2.preference);
-
     const newTeam: Team = {
       id: `team_${Date.now()}`,
       person1Id: person1.id,
       person2Id: person2.id,
-      kitchenId,
-      secondaryKitchenId,
-      preference,
     };
 
     dispatch({
@@ -350,18 +305,24 @@ export function Step3TeamAssignment() {
               </TableHeader>
               <TableBody>
                 {sortedTeamsWithDetails.map(
-                  ({ team, person1, person2, kitchen, secondaryKitchen, chosenPreference, preferenceNote }) => (
+                  ({ team, person1, person2, kitchenOptions, chosenPreference, preferenceNote }) => (
                   <TableRow key={team.id}>
                     <TableCell>{person1?.name ?? "?"}</TableCell>
                     <TableCell>{person2?.name ?? "?"}</TableCell>
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
-                          {kitchen?.address ?? team.kitchenId ?? "?"}
-                        </span>
-                        {secondaryKitchen && (
+                        {kitchenOptions.length > 0 ? (
+                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
+                            {kitchenOptions[0]}
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
+                            ?
+                          </span>
+                        )}
+                        {kitchenOptions[1] && (
                           <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium">
-                            {secondaryKitchen.address}
+                            {kitchenOptions[1]}
                           </span>
                         )}
                       </div>

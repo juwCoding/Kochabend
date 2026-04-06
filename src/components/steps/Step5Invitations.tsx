@@ -21,12 +21,20 @@ export function Step5Invitations() {
   const [previewPersonId, setPreviewPersonId] = useState<string>("");
   const [generatedInvitations, setGeneratedInvitations] = useState<Record<string, string>>(state.generatedInvitations);
 
-  const availablePlaceholders = getAvailablePlaceholders();
+  const availablePlaceholders = getAvailablePlaceholders(
+    state.columnMapping,
+    state.customFields
+  );
 
   const previewPerson = useMemo(() => {
     if (!previewPersonId) return null;
     return state.persons.find((p) => p.id === previewPersonId);
   }, [previewPersonId, state.persons]);
+
+  const sortedPersons = useMemo(
+    () => [...state.persons].sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" })),
+    [state.persons]
+  );
 
   const previewText = useMemo(() => {
     if (!previewPerson) return "";
@@ -42,7 +50,9 @@ export function Step5Invitations() {
       team,
       distribution,
       state.persons,
-      state.teams
+      state.teams,
+      state.customFields,
+      state.columnMapping
     );
   }, [template, previewPerson, state]);
 
@@ -59,7 +69,9 @@ export function Step5Invitations() {
       template,
       state.persons,
       state.teams,
-      state.distribution
+      state.distribution,
+      state.customFields,
+      state.columnMapping
     );
     setGeneratedInvitations(invitations);
     dispatch({
@@ -169,7 +181,7 @@ export function Step5Invitations() {
                 <SelectValue placeholder="Person auswählen" />
               </SelectTrigger>
               <SelectContent>
-                {state.persons.map((person) => (
+                {sortedPersons.map((person) => (
                   <SelectItem key={person.id} value={person.id}>
                     {person.name}
                   </SelectItem>

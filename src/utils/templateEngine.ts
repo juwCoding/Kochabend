@@ -1,16 +1,33 @@
 import type { Person, Team, Distribution } from "@/types/models";
+import { getTeamKitchenOptions, getTeamPreference } from "@/utils/teamDerived";
+import {
+  formatCourseLabel,
+  formatFoodPreferenceLabel,
+  formatKitchenLabel,
+} from "@/utils/valueResolution";
 
 // Get all available placeholders from a person and their team/distribution data
-export function getAvailablePlaceholders(): string[] {
-  return [
-    "Name",
-    "Ernährungsform",
-    "Unverträglichkeiten",
-    "Adresse",
-    "Gruppe", // Rückwärtskompatibilität
-    "Partner",
-    "Küche",
-    "Gericht-Präferenz",
+export function getAvailablePlaceholders(
+  columnMapping: Record<string, string>,
+  customFields: Record<string, string>
+): string[] {
+  const mappedFields = new Set(Object.values(columnMapping));
+  const placeholders: string[] = [];
+  const addIfMapped = (fieldId: string, placeholder: string) => {
+    if (mappedFields.has(fieldId)) placeholders.push(placeholder);
+  };
+
+  addIfMapped("name", "Name");
+  addIfMapped("preference", "Ernährungsform");
+  addIfMapped("intolerances", "Unverträglichkeiten");
+  addIfMapped("kitchenAddress", "Adresse");
+  addIfMapped("partner", "Gruppe"); // Rückwärtskompatibilität
+  addIfMapped("partner", "Partner");
+  addIfMapped("kitchen", "Küche");
+  addIfMapped("coursePreference", "Gericht-Präferenz");
+
+  // Team-/Verteilungsfelder bleiben verfügbar.
+  placeholders.push(
     "TeamPartner",
     "TeamKüche",
     "TeamPräferenz",
@@ -19,8 +36,16 @@ export function getAvailablePlaceholders(): string[] {
     "IsstBei1",
     "IsstBei1Gang",
     "IsstBei2",
-    "IsstBei2Gang",
-  ];
+    "IsstBei2Gang"
+  );
+
+  for (const fieldId of mappedFields) {
+    if (!fieldId.startsWith("custom_")) continue;
+    const fieldName = customFields[fieldId]?.trim();
+    if (fieldName) placeholders.push(fieldName);
+  }
+
+  return placeholders;
 }
 
 // Replace placeholders in template
@@ -30,14 +55,16 @@ export function replacePlaceholders(
   team: Team | undefined,
   distribution: Distribution | undefined,
   allPersons: Person[],
-  allTeams: Team[]
+  allTeams: Team[],
+  customFields: Record<string, string>,
+  columnMapping: Record<string, string>
 ): string {
   let result = template;
 
   // Basic person fields
   result = result.replace(/\{\{Name\}\}/g, person.name);
-  result = result.replace(/\{\{Ernährungsform\}\}/g, person.preference ?? "");
-  result = result.replace(/\{\{Präferenz\}\}/g, person.preference ?? ""); // Rückwärtskompatibilität
+  result = result.replace(/\{\{Ernährungsform\}\}/g, formatFoodPreferenceLabel(person.preference ?? ""));
+  result = result.replace(/\{\{Präferenz\}\}/g, formatFoodPreferenceLabel(person.preference ?? "")); // Rückwärtskompatibilität
   result = result.replace(/\{\{Unverträglichkeiten\}\}/g, person.intolerances || "");
   result = result.replace(/\{\{Adresse\}\}/g, person.kitchenAddress);
   // Partner: aus Team oder person.partner
@@ -49,20 +76,19 @@ export function replacePlaceholders(
   }
   result = result.replace(/\{\{Gruppe\}\}/g, partnerName); // Rückwärtskompatibilität
   result = result.replace(/\{\{Partner\}\}/g, partnerName);
-  result = result.replace(/\{\{Küche\}\}/g, person.kitchen ?? "");
-  result = result.replace(/\{\{Gericht-Präferenz\}\}/g, person.coursePreference || "");
+  result = result.replace(/\{\{Küche\}\}/g, formatKitchenLabel(person.kitchen ?? ""));
+  result = result.replace(/\{\{Gericht-Präferenz\}\}/g, formatCourseLabel(person.coursePreference || ""));
 
   // Team fields
   if (team) {
     const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
     const partner = allPersons.find((p) => p.id === partnerId);
-    const teamKitchenLabel = team.secondaryKitchenId
-      ? `${team.kitchenId} / ${team.secondaryKitchenId}`
-      : team.kitchenId;
+    const teamKitchenLabel = getTeamKitchenOptions(team, allPersons).join(" / ");
+    const teamPreference = getTeamPreference(team, allPersons);
     
     result = result.replace(/\{\{TeamPartner\}\}/g, partner?.name || "");
     result = result.replace(/\{\{TeamKüche\}\}/g, teamKitchenLabel);
-    result = result.replace(/\{\{TeamPräferenz\}\}/g, team.preference);
+    result = result.replace(/\{\{TeamPräferenz\}\}/g, formatFoodPreferenceLabel(teamPreference));
   } else {
     result = result.replace(/\{\{TeamPartner\}\}/g, "");
     result = result.replace(/\{\{TeamKüche\}\}/g, "");
@@ -123,6 +149,15 @@ export function replacePlaceholders(
     result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
   }
 
+  const mappedFields = new Set(Object.values(columnMapping));
+  for (const fieldId of mappedFields) {
+    if (!fieldId.startsWith("custom_")) continue;
+    const fieldName = customFields[fieldId]?.trim();
+    if (!fieldName) continue;
+    const value = person.customFieldValues?.[fieldId] ?? "";
+    result = result.replaceAll(`{{${fieldName}}}`, value);
+  }
+
   return result;
 }
 
@@ -131,7 +166,9 @@ export function generateAllInvitations(
   template: string,
   persons: Person[],
   teams: Team[],
-  distributions: Distribution[]
+  distributions: Distribution[],
+  customFields: Record<string, string>,
+  columnMapping: Record<string, string>
 ): Record<string, string> {
   const invitations: Record<string, string> = {};
 
@@ -147,7 +184,9 @@ export function generateAllInvitations(
       team,
       distribution,
       persons,
-      teams
+      teams,
+      customFields,
+      columnMapping
     );
   }
 

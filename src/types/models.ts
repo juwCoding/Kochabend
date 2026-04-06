@@ -62,9 +62,7 @@ export interface Team {
   id: string;
   person1Id: string;
   person2Id: string;
-  kitchenId: string; // Primäre Team-Küche (Adresse)
-  secondaryKitchenId?: string; // Optionale zweite Team-Küche (Adresse)
-  preference: FoodPreference; // Kombinierte Präferenz (vegan wenn einer vegan, vegetarisch wenn einer vegetarisch, sonst egal)
+  // Abgeleitete Werte wie Küche/Präferenz werden dynamisch aus den Person-Daten berechnet.
 }
 
 // Gastgeber-Verhältnis: Welches Team isst bei welchem Team

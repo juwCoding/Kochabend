@@ -1,13 +1,12 @@
 import type { Team, Distribution, Course, Kitchen, Person } from "@/types/models";
+import { getTeamKitchenOptions, getTeamPreference } from "@/utils/teamDerived";
 
 // Get kitchens from teams
 function getKitchensFromTeams(teams: Team[], persons: Person[]): Map<string, Kitchen> {
   const kitchenMap = new Map<string, Kitchen>();
   
   for (const team of teams) {
-    const teamKitchenIds = [team.kitchenId, team.secondaryKitchenId].filter(
-      (kitchenId): kitchenId is string => Boolean(kitchenId)
-    );
+    const teamKitchenIds = getTeamKitchenOptions(team, persons);
     for (const kitchenId of teamKitchenIds) {
       if (!kitchenMap.has(kitchenId)) {
         const person = persons.find((p) => p.kitchenAddress === kitchenId);
@@ -61,11 +60,13 @@ function isKitchenAvailable(
 }
 
 // Calculate preference match score (higher is better)
-function calculatePreferenceMatch(team1: Team, team2: Team): number {
-  if (team1.preference === team2.preference && team1.preference !== "egal") {
+function calculatePreferenceMatchWithPersons(team1: Team, team2: Team, persons: Person[]): number {
+  const pref1 = getTeamPreference(team1, persons);
+  const pref2 = getTeamPreference(team2, persons);
+  if (pref1 === pref2 && pref1 !== "egal") {
     return 2; // Both vegan or both vegetarian
   }
-  if (team1.preference === "egal" || team2.preference === "egal") {
+  if (pref1 === "egal" || pref2 === "egal") {
     return 1; // One is flexible
   }
   return 0; // Mismatch (vegan + vegetarian)
@@ -103,9 +104,7 @@ export function createDistribution(
   for (const { team, course } of courseAssignments) {
     // Find available kitchen for this team and course
     let assignedKitchen: string | null = null;
-    const preferredKitchenIds = [team.kitchenId, team.secondaryKitchenId].filter(
-      (kitchenId): kitchenId is string => Boolean(kitchenId)
-    );
+    const preferredKitchenIds = getTeamKitchenOptions(team, persons);
     
     // Prefer team's own kitchens (primary first, then secondary)
     for (const preferredKitchenId of preferredKitchenIds) {
@@ -160,8 +159,8 @@ export function createDistribution(
     
     // Sort by preference match
     availableTeams.sort((a, b) => {
-      const scoreA = calculatePreferenceMatch(team, a);
-      const scoreB = calculatePreferenceMatch(team, b);
+      const scoreA = calculatePreferenceMatchWithPersons(team, a, persons);
+      const scoreB = calculatePreferenceMatchWithPersons(team, b, persons);
       return scoreB - scoreA;
     });
     
