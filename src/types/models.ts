@@ -62,7 +62,8 @@ export interface Team {
   id: string;
   person1Id: string;
   person2Id: string;
-  kitchenId: string; // Zugewiesene Kitchen (Adresse)
+  kitchenId: string; // Primäre Team-Küche (Adresse)
+  secondaryKitchenId?: string; // Optionale zweite Team-Küche (Adresse)
   preference: FoodPreference; // Kombinierte Präferenz (vegan wenn einer vegan, vegetarisch wenn einer vegetarisch, sonst egal)
 }
 
@@ -90,6 +91,11 @@ export interface ValueMapping {
   isDefault?: boolean;
 }
 
+export interface SortSpec {
+  key: string;
+  dir: "asc" | "desc";
+}
+
 /** Anzahl der Wizard-Schritte (muss mit `STEPS` in App.tsx übereinstimmen). */
 export const WIZARD_STEP_COUNT = 5;
 
@@ -112,9 +118,11 @@ export interface AppState {
   
   // Schritt 2: Bereinigte Personen
   persons: Person[];
+  step2SortSpecs: SortSpec[];
   
   // Schritt 3: Teams
   teams: Team[];
+  step3SortSpecs: SortSpec[];
   
   // Schritt 4: Verteilung
   distribution: Distribution[];
@@ -134,7 +142,9 @@ export const initialAppState: AppState = {
   customFields: {},
   valueMappings: [],
   persons: [],
+  step2SortSpecs: [],
   teams: [],
+  step3SortSpecs: [],
   distribution: [],
   invitationTemplate: "",
   generatedInvitations: {},

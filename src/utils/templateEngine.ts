@@ -56,9 +56,12 @@ export function replacePlaceholders(
   if (team) {
     const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
     const partner = allPersons.find((p) => p.id === partnerId);
+    const teamKitchenLabel = team.secondaryKitchenId
+      ? `${team.kitchenId} / ${team.secondaryKitchenId}`
+      : team.kitchenId;
     
     result = result.replace(/\{\{TeamPartner\}\}/g, partner?.name || "");
-    result = result.replace(/\{\{TeamKüche\}\}/g, team.kitchenId);
+    result = result.replace(/\{\{TeamKüche\}\}/g, teamKitchenLabel);
     result = result.replace(/\{\{TeamPräferenz\}\}/g, team.preference);
   } else {
     result = result.replace(/\{\{TeamPartner\}\}/g, "");

@@ -12,8 +12,10 @@ type AppStateAction =
   | { type: "ADD_CUSTOM_FIELD"; payload: { fieldId: string; fieldName: string } }
   | { type: "SET_VALUE_MAPPINGS"; payload: AppState["valueMappings"] }
   | { type: "SET_PERSONS"; payload: AppState["persons"] }
+  | { type: "SET_STEP2_SORT_SPECS"; payload: AppState["step2SortSpecs"] }
   | { type: "UPDATE_PERSON"; payload: { id: string; updates: Partial<AppState["persons"][0]> } }
   | { type: "SET_TEAMS"; payload: AppState["teams"] }
+  | { type: "SET_STEP3_SORT_SPECS"; payload: AppState["step3SortSpecs"] }
   | { type: "SET_DISTRIBUTION"; payload: AppState["distribution"] }
   | { type: "SET_INVITATION_TEMPLATE"; payload: string }
   | { type: "SET_GENERATED_INVITATIONS"; payload: Record<string, string> }
@@ -32,6 +34,14 @@ interface AppStateWithHistory {
 }
 
 function hydrateAppStateShape(base: AppState): AppState {
+  const validSortSpecs = (specs: AppState["step2SortSpecs"] | AppState["step3SortSpecs"]) =>
+    Array.isArray(specs)
+      ? specs.filter(
+          (s): s is { key: string; dir: "asc" | "desc" } =>
+            !!s && typeof s.key === "string" && (s.dir === "asc" || s.dir === "desc")
+        )
+      : [];
+
   return {
     ...base,
     currentStep: clampWizardStepIndex(
@@ -39,6 +49,8 @@ function hydrateAppStateShape(base: AppState): AppState {
     ),
     valueMappings: hydrateValueMappingsIfEmpty(base.valueMappings),
     hasHeader: typeof base.hasHeader === "boolean" ? base.hasHeader : true,
+    step2SortSpecs: validSortSpecs(base.step2SortSpecs),
+    step3SortSpecs: validSortSpecs(base.step3SortSpecs),
   };
 }
 
@@ -131,10 +143,22 @@ function appStateReducer(
         persons: action.payload,
       };
       break;
+    case "SET_STEP2_SORT_SPECS":
+      newState = {
+        ...state.current,
+        step2SortSpecs: action.payload,
+      };
+      break;
     case "SET_TEAMS":
       newState = {
         ...state.current,
         teams: action.payload,
+      };
+      break;
+    case "SET_STEP3_SORT_SPECS":
+      newState = {
+        ...state.current,
+        step3SortSpecs: action.payload,
       };
       break;
     case "SET_DISTRIBUTION":

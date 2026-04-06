@@ -5,15 +5,20 @@ function getKitchensFromTeams(teams: Team[], persons: Person[]): Map<string, Kit
   const kitchenMap = new Map<string, Kitchen>();
   
   for (const team of teams) {
-    if (!kitchenMap.has(team.kitchenId)) {
-      const person = persons.find((p) => p.kitchenAddress === team.kitchenId);
-      if (person) {
-        kitchenMap.set(team.kitchenId, {
-          id: team.kitchenId,
-          address: team.kitchenId,
-          capacity: 1,
-          availableSlots: ["Vorspeise", "Hauptgang", "Nachspeise"],
-        });
+    const teamKitchenIds = [team.kitchenId, team.secondaryKitchenId].filter(
+      (kitchenId): kitchenId is string => Boolean(kitchenId)
+    );
+    for (const kitchenId of teamKitchenIds) {
+      if (!kitchenMap.has(kitchenId)) {
+        const person = persons.find((p) => p.kitchenAddress === kitchenId);
+        if (person) {
+          kitchenMap.set(kitchenId, {
+            id: kitchenId,
+            address: kitchenId,
+            capacity: 1,
+            availableSlots: ["Vorspeise", "Hauptgang", "Nachspeise"],
+          });
+        }
       }
     }
   }
@@ -98,11 +103,19 @@ export function createDistribution(
   for (const { team, course } of courseAssignments) {
     // Find available kitchen for this team and course
     let assignedKitchen: string | null = null;
+    const preferredKitchenIds = [team.kitchenId, team.secondaryKitchenId].filter(
+      (kitchenId): kitchenId is string => Boolean(kitchenId)
+    );
     
-    // Prefer team's own kitchen
-    if (isKitchenAvailable(team.kitchenId, course, distribution)) {
-      assignedKitchen = team.kitchenId;
-    } else {
+    // Prefer team's own kitchens (primary first, then secondary)
+    for (const preferredKitchenId of preferredKitchenIds) {
+      if (isKitchenAvailable(preferredKitchenId, course, distribution)) {
+        assignedKitchen = preferredKitchenId;
+        break;
+      }
+    }
+
+    if (!assignedKitchen) {
       // Find another available kitchen
       for (const [kitchenId] of kitchens) {
         if (isKitchenAvailable(kitchenId, course, distribution)) {

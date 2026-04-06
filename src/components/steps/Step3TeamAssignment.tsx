@@ -5,11 +5,107 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { Team, FoodPreference } from "@/types/models";
-import { Users, Trash2 } from "lucide-react";
+import { Users, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { categorizePartnerFields } from "@/utils/partnerSuggestions";
+
+function hasUsableKitchen(personKitchen?: string): boolean {
+  return personKitchen === "kann_gekocht_werden" || personKitchen === "partner_kocht";
+}
+
+function preferenceRank(preference?: FoodPreference): number {
+  if (preference === "vegan") return 3;
+  if (preference === "vegetarisch") return 2;
+  return 1; // egal oder fehlend
+}
+
+function combinePreference(person1Preference?: FoodPreference, person2Preference?: FoodPreference): FoodPreference {
+  const p1 = person1Preference ?? "egal";
+  const p2 = person2Preference ?? "egal";
+  return preferenceRank(p1) >= preferenceRank(p2) ? p1 : p2;
+}
 
 function teamPersonIdSet(teams: { person1Id: string; person2Id: string }[]): Set<string> {
   return new Set(teams.flatMap((t) => [t.person1Id, t.person2Id]));
+}
+
+type TeamTableSortKey = "person1" | "person2" | "kitchen" | "preference";
+type TeamSortSpec = { key: TeamTableSortKey; dir: "asc" | "desc" };
+
+interface TeamWithDetails {
+  team: Team;
+  person1?: { name?: string };
+  person2?: { name?: string };
+  kitchen?: { address: string };
+  secondaryKitchen?: { address: string };
+  chosenPreference: FoodPreference;
+  preferenceNote: string | null;
+}
+
+function sortComparableForTeamColumn(team: TeamWithDetails, key: TeamTableSortKey): string {
+  switch (key) {
+    case "person1":
+      return (team.person1?.name ?? "").trim();
+    case "person2":
+      return (team.person2?.name ?? "").trim();
+    case "kitchen":
+      return `${team.kitchen?.address ?? team.team.kitchenId ?? ""} ${team.secondaryKitchen?.address ?? ""}`
+        .trim();
+    case "preference":
+      return `${team.chosenPreference} ${team.preferenceNote ?? ""}`.trim();
+    default:
+      return "";
+  }
+}
+
+function compareTeamsBySortSpecs(a: TeamWithDetails, b: TeamWithDetails, specs: TeamSortSpec[]): number {
+  for (const { key, dir } of specs) {
+    const va = sortComparableForTeamColumn(a, key);
+    const vb = sortComparableForTeamColumn(b, key);
+    const cmp = va.localeCompare(vb, "de", { numeric: true, sensitivity: "base" });
+    if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+  }
+  return 0;
+}
+
+function TeamTableSortHead({
+  label,
+  columnKey,
+  sortSpecs,
+  onToggle,
+  onPromote,
+}: {
+  label: string;
+  columnKey: TeamTableSortKey;
+  sortSpecs: TeamSortSpec[];
+  onToggle: (key: TeamTableSortKey) => void;
+  onPromote: (key: TeamTableSortKey) => void;
+}) {
+  const specIndex = sortSpecs.findIndex((s) => s.key === columnKey);
+  const spec = specIndex >= 0 ? sortSpecs[specIndex] : undefined;
+  const showPriorityIndex = sortSpecs.length > 1 && spec !== undefined && specIndex >= 0;
+  return (
+    <TableHead className="cursor-pointer select-none hover:bg-muted/50" onClick={() => onToggle(columnKey)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {spec?.dir === "asc" && <ChevronUp className="h-4 w-4 shrink-0 opacity-70" aria-hidden />}
+        {spec?.dir === "desc" && <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />}
+        {showPriorityIndex && (
+          <button
+            type="button"
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-medium text-muted-foreground tabular-nums leading-none hover:bg-muted"
+            aria-label={`Sortierpriorität ${specIndex + 1} von ${sortSpecs.length}`}
+            title={specIndex > 0 ? `#${specIndex + 1}: eins nach vorne schieben` : `#${specIndex + 1}: bereits zuerst`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPromote(columnKey);
+            }}
+          >
+            {specIndex + 1}
+          </button>
+        )}
+      </span>
+    </TableHead>
+  );
 }
 
 export function Step3TeamAssignment() {
@@ -17,6 +113,13 @@ export function Step3TeamAssignment() {
   const [selectedPerson1, setSelectedPerson1] = useState<string>("");
   const [selectedPerson2, setSelectedPerson2] = useState<string>("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const teamSortSpecs = useMemo(
+    () =>
+      state.step3SortSpecs.filter(
+        (s): s is TeamSortSpec => typeof s?.key === "string" && (s.dir === "asc" || s.dir === "desc")
+      ),
+    [state.step3SortSpecs]
+  );
 
   const teamPersonIds = useMemo(() => teamPersonIdSet(state.teams), [state.teams]);
 
@@ -42,14 +145,65 @@ export function Step3TeamAssignment() {
       const person1 = state.persons.find((p) => p.id === team.person1Id);
       const person2 = state.persons.find((p) => p.id === team.person2Id);
       const kitchen = kitchens.find((k) => k.id === team.kitchenId);
+      const secondaryKitchen = team.secondaryKitchenId
+        ? kitchens.find((k) => k.id === team.secondaryKitchenId)
+        : undefined;
+
+      const person1Preference = person1?.preference ?? "egal";
+      const person2Preference = person2?.preference ?? "egal";
+      const chosenPreference = combinePreference(person1Preference, person2Preference);
+      const preferenceNote =
+        person1Preference !== person2Preference
+          ? preferenceRank(person1Preference) >= preferenceRank(person2Preference)
+            ? `(${person2?.name ?? "?"}: ${person2Preference})`
+            : `(${person1?.name ?? "?"}: ${person1Preference})`
+          : null;
+
       return {
         team,
         person1,
         person2,
         kitchen,
+        secondaryKitchen,
+        chosenPreference,
+        preferenceNote,
       };
     });
   }, [state.teams, state.persons, kitchens]);
+
+  const sortedTeamsWithDetails = useMemo(() => {
+    if (teamSortSpecs.length === 0) return teamsWithDetails;
+    const indexed = teamsWithDetails.map((t, i) => ({ t, i }));
+    indexed.sort((a, b) => {
+      const cmp = compareTeamsBySortSpecs(a.t, b.t, teamSortSpecs);
+      if (cmp !== 0) return cmp;
+      return a.i - b.i;
+    });
+    return indexed.map((x) => x.t);
+  }, [teamsWithDetails, teamSortSpecs]);
+
+  const setStep3SortSpecs = (next: TeamSortSpec[]) => {
+    dispatch({ type: "SET_STEP3_SORT_SPECS", payload: next });
+  };
+
+  const toggleTeamColumnSort = (key: TeamTableSortKey) => {
+    const i = teamSortSpecs.findIndex((s) => s.key === key);
+    if (i === -1) return setStep3SortSpecs([...teamSortSpecs, { key, dir: "asc" }]);
+    if (teamSortSpecs[i].dir === "asc") {
+      return setStep3SortSpecs(
+        teamSortSpecs.map((s, j) => (j === i ? { ...s, dir: "desc" as const } : s))
+      );
+    }
+    setStep3SortSpecs(teamSortSpecs.filter((_, j) => j !== i));
+  };
+
+  const promoteTeamColumnSort = (key: TeamTableSortKey) => {
+    const i = teamSortSpecs.findIndex((s) => s.key === key);
+    if (i <= 0) return;
+    const next = [...teamSortSpecs];
+    [next[i - 1], next[i]] = [next[i], next[i - 1]];
+    setStep3SortSpecs(next);
+  };
 
   const partnerBuckets = useMemo(() => categorizePartnerFields(state.persons), [state.persons]);
 
@@ -79,29 +233,25 @@ export function Step3TeamAssignment() {
 
     if (!person1 || !person2) return;
 
-    let kitchenId: string;
-    if (person1.kitchen === "kann_gekocht_werden" || person1.kitchen === "partner_kocht") {
-      kitchenId = person1.kitchenAddress;
-    } else if (person2.kitchen === "kann_gekocht_werden" || person2.kitchen === "partner_kocht") {
-      kitchenId = person2.kitchenAddress;
-    } else {
-      kitchenId = person1.kitchenAddress;
+    const availableKitchenIds: string[] = [];
+    if (hasUsableKitchen(person1.kitchen) && person1.kitchenAddress) {
+      availableKitchenIds.push(person1.kitchenAddress);
     }
+    if (hasUsableKitchen(person2.kitchen) && person2.kitchenAddress) {
+      availableKitchenIds.push(person2.kitchenAddress);
+    }
+    const uniqueKitchenIds = Array.from(new Set(availableKitchenIds));
+    const kitchenId = uniqueKitchenIds[0] ?? person1.kitchenAddress ?? person2.kitchenAddress ?? "";
+    const secondaryKitchenId = uniqueKitchenIds[1];
 
-    let preference: FoodPreference;
-    if (person1.preference === "vegan" || person2.preference === "vegan") {
-      preference = "vegan";
-    } else if (person1.preference === "vegetarisch" || person2.preference === "vegetarisch") {
-      preference = "vegetarisch";
-    } else {
-      preference = "egal";
-    }
+    const preference = combinePreference(person1.preference, person2.preference);
 
     const newTeam: Team = {
       id: `team_${Date.now()}`,
       person1Id: person1.id,
       person2Id: person2.id,
       kitchenId,
+      secondaryKitchenId,
       preference,
     };
 
@@ -167,27 +317,69 @@ export function Step3TeamAssignment() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Person 1</TableHead>
-                  <TableHead>Person 2</TableHead>
-                  <TableHead>Küche</TableHead>
-                  <TableHead>Ernährungsform</TableHead>
-                  <TableHead className="w-[80px]">Aktionen</TableHead>
+                  <TeamTableSortHead
+                    label="Person 1"
+                    columnKey="person1"
+                    sortSpecs={teamSortSpecs}
+                    onToggle={toggleTeamColumnSort}
+                    onPromote={promoteTeamColumnSort}
+                  />
+                  <TeamTableSortHead
+                    label="Person 2"
+                    columnKey="person2"
+                    sortSpecs={teamSortSpecs}
+                    onToggle={toggleTeamColumnSort}
+                    onPromote={promoteTeamColumnSort}
+                  />
+                  <TeamTableSortHead
+                    label="Küche"
+                    columnKey="kitchen"
+                    sortSpecs={teamSortSpecs}
+                    onToggle={toggleTeamColumnSort}
+                    onPromote={promoteTeamColumnSort}
+                  />
+                  <TeamTableSortHead
+                    label="Ernährungsform"
+                    columnKey="preference"
+                    sortSpecs={teamSortSpecs}
+                    onToggle={toggleTeamColumnSort}
+                    onPromote={promoteTeamColumnSort}
+                  />
+                  <TableHead className="w-20">Aktionen</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {teamsWithDetails.map(({ team, person1, person2, kitchen }) => (
+                {sortedTeamsWithDetails.map(
+                  ({ team, person1, person2, kitchen, secondaryKitchen, chosenPreference, preferenceNote }) => (
                   <TableRow key={team.id}>
                     <TableCell>{person1?.name ?? "?"}</TableCell>
                     <TableCell>{person2?.name ?? "?"}</TableCell>
-                    <TableCell>{kitchen?.address ?? "?"}</TableCell>
-                    <TableCell>{team.preference}</TableCell>
+                    <TableCell>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
+                          {kitchen?.address ?? team.kitchenId ?? "?"}
+                        </span>
+                        {secondaryKitchen && (
+                          <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium">
+                            {secondaryKitchen.address}
+                          </span>
+                        )}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <span>{chosenPreference}</span>
+                      {preferenceNote && (
+                        <span className="ml-2 text-muted-foreground">{preferenceNote}</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Button variant="ghost" size="icon" onClick={() => handleDeleteTeam(team.id)}>
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                )
+                )}
               </TableBody>
             </Table>
           </div>
@@ -326,7 +518,7 @@ export function Step3TeamAssignment() {
                   {availablePersons.map((person) => (
                     <SelectItem key={person.id} value={person.id}>
                       {person.name} (
-                      {person.kitchen === "kann_gekocht_werden" || person.kitchen === "partner_kocht"
+                      {hasUsableKitchen(person.kitchen)
                         ? "mit Küche"
                         : "ohne Küche"}
                       )
@@ -347,7 +539,7 @@ export function Step3TeamAssignment() {
                     .map((person) => (
                       <SelectItem key={person.id} value={person.id}>
                         {person.name} (
-                        {person.kitchen === "kann_gekocht_werden" || person.kitchen === "partner_kocht"
+                        {hasUsableKitchen(person.kitchen)
                           ? "mit Küche"
                           : "ohne Küche"}
                         )

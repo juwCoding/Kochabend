@@ -42,7 +42,7 @@ export function Wizard({
           </span>
         </Button>
 
-        <div className="flex items-center justify-center min-w-0 overflow-x-auto py-1">
+        <div className="flex items-center justify-center min-w-0 overflow-x-auto p-1">
           {Array.from({ length: totalSteps }).map((_, index) => {
             const unlocked = index <= maxReachableStep;
             const isCurrent = index === currentStep;

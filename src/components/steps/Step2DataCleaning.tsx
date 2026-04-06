@@ -29,7 +29,7 @@ import {
   type MappingSuggestion,
   type SuggestionField,
 } from "@/utils/mappingSuggestions";
-import { AlertCircle, CheckCircle2, ChevronDown, Settings } from "lucide-react";
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Settings } from "lucide-react";
 import type { FoodPreference, KitchenStatus, CoursePreference } from "@/types/models";
 import { cn } from "@/lib/utils";
 
@@ -50,6 +50,100 @@ function cellErrorClass(issues: DataIssue[]): string {
 
 function normText(s: string | undefined): string {
   return (s ?? "").trim();
+}
+
+/** Spalten-Keys für die Daten-Tabelle (Sortierung). */
+type DataTableSortKey =
+  | "name"
+  | "preference"
+  | "intolerances"
+  | "partner"
+  | "kitchen"
+  | "kitchenAddress"
+  | "coursePreference"
+  | `custom:${string}`;
+
+type SortSpec = { key: DataTableSortKey; dir: "asc" | "desc" };
+
+/** Vergleichsstring = effektiver Wert (wie in der Zelle, inkl. Mapping/Manuell). */
+function sortComparableForColumn(person: Person, key: DataTableSortKey): string {
+  switch (key) {
+    case "name":
+      return normText(person.name);
+    case "preference":
+      return formatFoodPreferenceLabel(person.preference ?? "");
+    case "intolerances":
+      return normText(person.intolerances);
+    case "partner":
+      return normText(person.partner);
+    case "kitchen":
+      return formatKitchenLabel(person.kitchen ?? "");
+    case "kitchenAddress":
+      return normText(person.kitchenAddress);
+    case "coursePreference":
+      return formatCourseLabel(person.coursePreference ?? "");
+    default:
+      if (key.startsWith("custom:")) {
+        const id = key.slice("custom:".length);
+        return normText(person.customFieldValues?.[id]);
+      }
+      return "";
+  }
+}
+
+function comparePersonsBySortSpecs(a: Person, b: Person, specs: SortSpec[]): number {
+  for (const { key, dir } of specs) {
+    const va = sortComparableForColumn(a, key);
+    const vb = sortComparableForColumn(b, key);
+    const cmp = va.localeCompare(vb, "de", { numeric: true, sensitivity: "base" });
+    if (cmp !== 0) return dir === "asc" ? cmp : -cmp;
+  }
+  return 0;
+}
+
+function DataTableSortHead({
+  label,
+  columnKey,
+  sortSpecs,
+  onToggle,
+  onPromote,
+}: {
+  label: string;
+  columnKey: DataTableSortKey;
+  sortSpecs: SortSpec[];
+  onToggle: (key: DataTableSortKey) => void;
+  onPromote: (key: DataTableSortKey) => void;
+}) {
+  const specIndex = sortSpecs.findIndex((s) => s.key === columnKey);
+  const spec = specIndex >= 0 ? sortSpecs[specIndex] : undefined;
+  const showPriorityIndex =
+    sortSpecs.length > 1 && spec !== undefined && specIndex >= 0;
+  return (
+    <TableHead
+      className="cursor-pointer select-none hover:bg-muted/50"
+      onClick={() => onToggle(columnKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {spec?.dir === "asc" && <ChevronUp className="h-4 w-4 shrink-0 opacity-70" aria-hidden />}
+        {spec?.dir === "desc" && <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />}
+        {showPriorityIndex && (
+          <button
+            type="button"
+            className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-medium text-muted-foreground tabular-nums leading-none hover:bg-primary/40 hover:text-white cursor-cell"
+            aria-label={`Sortierpriorität ${specIndex + 1} von ${sortSpecs.length}`}
+            title={`Gibt Sortierungsreihenfolge an.${specIndex > 0 ? " Mit Klick wird es bevorzugt." : ""}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onPromote(columnKey);
+            }}
+          >
+            {specIndex + 1}
+          </button>
+        )}
+      </span>
+    </TableHead>
+  );
 }
 
 function normalizeSuggestionText(s: string): string {
@@ -263,6 +357,13 @@ export function Step2DataCleaning() {
   const [newMappingRaw, setNewMappingRaw] = useState("");
   const [newMappingValue, setNewMappingValue] = useState("");
   const [isRawSuggestionsOpen, setIsRawSuggestionsOpen] = useState(false);
+  const sortSpecs = useMemo(
+    () =>
+      state.step2SortSpecs.filter(
+        (s): s is SortSpec => typeof s?.key === "string" && (s.dir === "asc" || s.dir === "desc")
+      ),
+    [state.step2SortSpecs]
+  );
 
   const isCourseColumnMappedHere = useMemo(
     () => isCourseColumnMapped(state.columnMapping),
@@ -279,6 +380,56 @@ export function Step2DataCleaning() {
     if (!isCourseColumnMappedHere && mappingField === "coursePreference") return "kitchen";
     return mappingField;
   }, [isCourseColumnMappedHere, mappingField]);
+
+  const validCustomFieldIds = useMemo(
+    () => new Set(Object.keys(state.customFields)),
+    [state.customFields]
+  );
+
+  /** Nur gültige Spalten (sichtbare Spalten); versteckte Einträge bleiben in sortSpecs für späteres Wieder-Einblenden. */
+  const activeSortSpecs = useMemo(
+    () =>
+      sortSpecs.filter((s) => {
+        if (s.key === "coursePreference" && !isCourseColumnMappedHere) return false;
+        if (s.key.startsWith("custom:")) {
+          return validCustomFieldIds.has(s.key.slice("custom:".length));
+        }
+        return true;
+      }),
+    [sortSpecs, isCourseColumnMappedHere, validCustomFieldIds]
+  );
+
+  const sortedPersons = useMemo(() => {
+    if (activeSortSpecs.length === 0) return persons;
+    const indexed = persons.map((p, i) => ({ p, i }));
+    indexed.sort((a, b) => {
+      const c = comparePersonsBySortSpecs(a.p, b.p, activeSortSpecs);
+      if (c !== 0) return c;
+      return a.i - b.i;
+    });
+    return indexed.map((x) => x.p);
+  }, [persons, activeSortSpecs]);
+
+  const setStep2SortSpecs = (next: SortSpec[]) => {
+    dispatch({ type: "SET_STEP2_SORT_SPECS", payload: next });
+  };
+
+  const toggleColumnSort = (key: DataTableSortKey) => {
+    const i = sortSpecs.findIndex((s) => s.key === key);
+    if (i === -1) return setStep2SortSpecs([...sortSpecs, { key, dir: "asc" }]);
+    if (sortSpecs[i].dir === "asc") {
+      return setStep2SortSpecs(sortSpecs.map((s, j) => (j === i ? { ...s, dir: "desc" as const } : s)));
+    }
+    setStep2SortSpecs(sortSpecs.filter((_, j) => j !== i));
+  };
+
+  const promoteColumnSort = (key: DataTableSortKey) => {
+    const i = sortSpecs.findIndex((s) => s.key === key);
+    if (i <= 0) return;
+    const next = [...sortSpecs];
+    [next[i - 1], next[i]] = [next[i], next[i - 1]];
+    setStep2SortSpecs(next);
+  };
 
   const commitPersons = (next: Person[]) => {
     setPersons(next);
@@ -838,20 +989,71 @@ export function Step2DataCleaning() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Ernährungsform</TableHead>
-                  <TableHead>Unverträglichkeiten</TableHead>
-                  <TableHead>Partner</TableHead>
-                  <TableHead>Küche</TableHead>
-                  <TableHead>Küchen-Adresse</TableHead>
-                  {isCourseColumnMappedHere && <TableHead>Gericht-Präferenz</TableHead>}
+                  <DataTableSortHead
+                    label="Name"
+                    columnKey="name"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  <DataTableSortHead
+                    label="Ernährungsform"
+                    columnKey="preference"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  <DataTableSortHead
+                    label="Unverträglichkeiten"
+                    columnKey="intolerances"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  <DataTableSortHead
+                    label="Partner"
+                    columnKey="partner"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  <DataTableSortHead
+                    label="Küche"
+                    columnKey="kitchen"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  <DataTableSortHead
+                    label="Küchen-Adresse"
+                    columnKey="kitchenAddress"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
+                  {isCourseColumnMappedHere && (
+                    <DataTableSortHead
+                      label="Gericht-Präferenz"
+                      columnKey="coursePreference"
+                      sortSpecs={activeSortSpecs}
+                      onToggle={toggleColumnSort}
+                      onPromote={promoteColumnSort}
+                    />
+                  )}
                   {customFieldColumns.map(([fieldId, fieldName]) => (
-                    <TableHead key={fieldId}>{fieldName}</TableHead>
+                    <DataTableSortHead
+                      key={fieldId}
+                      label={fieldName}
+                      columnKey={`custom:${fieldId}`}
+                      sortSpecs={activeSortSpecs}
+                      onToggle={toggleColumnSort}
+                      onPromote={promoteColumnSort}
+                    />
                   ))}
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {persons.map((person) => {
+                {sortedPersons.map((person) => {
                   const nameIssues = getFieldIssues(person.id, "name");
                   const preferenceIssues = getFieldIssues(person.id, "preference");
                   const kitchenIssues = getFieldIssues(person.id, "kitchen");
