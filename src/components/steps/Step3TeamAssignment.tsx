@@ -20,6 +20,7 @@ import {
   getPersonIdsWithDuplicateTeamAssignments,
   orphanTeamPersonIds,
 } from "@/utils/teamDerived";
+import { stableTeamId } from "@/utils/stableTeamId";
 
 const KITCHEN_OPTIONS_ORDER: KitchenStatus[] = [
   "kann_gekocht_werden",
@@ -309,7 +310,7 @@ export function Step3TeamAssignment() {
     }
 
     const newTeam: Team = {
-      id: `team_${Date.now()}`,
+      id: stableTeamId(person1.id, person2.id),
       person1Id: person1.id,
       person2Id: person2.id,
     };

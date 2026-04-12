@@ -59,6 +59,15 @@ function isKitchenAvailable(
   return usageCount < 1;
 }
 
+function cookMemberNamesSnapshot(
+  team: Team,
+  persons: Person[]
+): readonly [string, string] {
+  const p1 = persons.find((p) => p.id === team.person1Id);
+  const p2 = persons.find((p) => p.id === team.person2Id);
+  return [p1?.name?.trim() || "Unbekannt", p2?.name?.trim() || "Unbekannt"] as const;
+}
+
 // Calculate preference match score (higher is better)
 function calculatePreferenceMatchWithPersons(team1: Team, team2: Team, persons: Person[]): number {
   const pref1 = getTeamPreference(team1, persons);
@@ -133,6 +142,7 @@ export function createDistribution(
       course,
       kitchenId: assignedKitchen,
       guestRelations: [], // Will be filled in next step
+      cookMemberNamesSnapshot: cookMemberNamesSnapshot(team, persons),
     });
   }
   
@@ -178,6 +188,7 @@ export function createDistribution(
           guestTeamId: team.id,
           hostTeamId: otherTeam.id,
           course: otherDist.course,
+          hostMemberNamesSnapshot: cookMemberNamesSnapshot(otherTeam, persons),
         });
         assignedCourses.add(otherDist.course);
       }
@@ -201,6 +212,7 @@ export function createDistribution(
           guestTeamId: team.id,
           hostTeamId: otherTeam.id,
           course: otherDist.course,
+          hostMemberNamesSnapshot: cookMemberNamesSnapshot(otherTeam, persons),
         });
       }
     }

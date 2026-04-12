@@ -1,4 +1,5 @@
 import type { Person, Team, Distribution } from "@/types/models";
+import { formatHostSnapshotUnd } from "@/utils/distributionDisplay";
 import { getTeamKitchenOptions, getTeamPreference } from "@/utils/teamDerived";
 import {
   formatCourseLabel,
@@ -110,9 +111,14 @@ export function replacePlaceholders(
       const hostPerson1_2 = hostTeam1
         ? allPersons.find((p) => p.id === hostTeam1.person2Id)
         : null;
-      const hostNames1 = hostPerson1_1 && hostPerson1_2
-        ? `${hostPerson1_1.name} und ${hostPerson1_2.name}`
-        : "";
+      let hostNames1 =
+        hostPerson1_1 && hostPerson1_2
+          ? `${hostPerson1_1.name} und ${hostPerson1_2.name}`
+          : "";
+      if (!hostNames1) {
+        const fromSnap = formatHostSnapshotUnd(relation1);
+        if (fromSnap) hostNames1 = fromSnap;
+      }
 
       result = result.replace(/\{\{IsstBei1\}\}/g, hostNames1);
       result = result.replace(/\{\{IsstBei1Gang\}\}/g, relation1.course);
@@ -130,9 +136,14 @@ export function replacePlaceholders(
       const hostPerson2_2 = hostTeam2
         ? allPersons.find((p) => p.id === hostTeam2.person2Id)
         : null;
-      const hostNames2 = hostPerson2_1 && hostPerson2_2
-        ? `${hostPerson2_1.name} und ${hostPerson2_2.name}`
-        : "";
+      let hostNames2 =
+        hostPerson2_1 && hostPerson2_2
+          ? `${hostPerson2_1.name} und ${hostPerson2_2.name}`
+          : "";
+      if (!hostNames2) {
+        const fromSnap = formatHostSnapshotUnd(relation2);
+        if (fromSnap) hostNames2 = fromSnap;
+      }
 
       result = result.replace(/\{\{IsstBei2\}\}/g, hostNames2);
       result = result.replace(/\{\{IsstBei2Gang\}\}/g, relation2.course);

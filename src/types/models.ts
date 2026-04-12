@@ -70,6 +70,8 @@ export interface GuestRelation {
   guestTeamId: string; // Team, das zu Gast ist
   hostTeamId: string;  // Team, bei dem gegessen wird
   course: Course;      // Welcher Gang
+  /** Koch-Partner des Gastgeber-Teams zum Zeitpunkt der Verteilungserstellung (Anzeige wenn hostTeamId veraltet). */
+  hostMemberNamesSnapshot?: readonly [string, string];
 }
 
 // Verteilung: Welches Team kocht welchen Gang
@@ -78,6 +80,8 @@ export interface Distribution {
   course: Course; // Welchen Gang kocht das Team
   kitchenId: string; // In welcher Küche
   guestRelations: GuestRelation[]; // Bei welchen Teams isst dieses Team
+  /** Koch-Team zum Zeitpunkt der Verteilungserstellung (Anzeige wenn teamId veraltet). */
+  cookMemberNamesSnapshot?: readonly [string, string];
 }
 
 // Value Mapping für Küche, Ernährungsform, Gericht-Präferenz

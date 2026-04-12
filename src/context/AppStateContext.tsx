@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import type { AppState } from "@/types/models";
 import { clampWizardStepIndex } from "@/types/models";
 import { getDefaultAppState, hydrateValueMappingsIfEmpty } from "@/defaultValueMappings";
+import { normalizeTeamsAndDistribution } from "@/utils/stableTeamId";
 
 // Action Types
 type AppStateAction =
@@ -42,6 +43,13 @@ function hydrateAppStateShape(base: AppState): AppState {
         )
       : [];
 
+  const teams = Array.isArray(base.teams) ? base.teams : [];
+  const distribution = Array.isArray(base.distribution) ? base.distribution : [];
+  const { teams: normTeams, distribution: normDist } = normalizeTeamsAndDistribution(
+    teams,
+    distribution
+  );
+
   return {
     ...base,
     currentStep: clampWizardStepIndex(
@@ -51,6 +59,8 @@ function hydrateAppStateShape(base: AppState): AppState {
     hasHeader: typeof base.hasHeader === "boolean" ? base.hasHeader : true,
     step2SortSpecs: validSortSpecs(base.step2SortSpecs),
     step3SortSpecs: validSortSpecs(base.step3SortSpecs),
+    teams: normTeams,
+    distribution: normDist,
   };
 }
 
@@ -149,24 +159,30 @@ function appStateReducer(
         step2SortSpecs: action.payload,
       };
       break;
-    case "SET_TEAMS":
-      newState = {
-        ...state.current,
-        teams: action.payload,
-      };
+    case "SET_TEAMS": {
+      const merged = { ...state.current, teams: action.payload };
+      const { teams, distribution } = normalizeTeamsAndDistribution(
+        merged.teams,
+        merged.distribution
+      );
+      newState = { ...merged, teams, distribution };
       break;
+    }
     case "SET_STEP3_SORT_SPECS":
       newState = {
         ...state.current,
         step3SortSpecs: action.payload,
       };
       break;
-    case "SET_DISTRIBUTION":
-      newState = {
-        ...state.current,
-        distribution: action.payload,
-      };
+    case "SET_DISTRIBUTION": {
+      const merged = { ...state.current, distribution: action.payload };
+      const { teams, distribution } = normalizeTeamsAndDistribution(
+        merged.teams,
+        merged.distribution
+      );
+      newState = { ...merged, teams, distribution };
       break;
+    }
     case "SET_INVITATION_TEMPLATE":
       newState = {
         ...state.current,
@@ -202,7 +218,7 @@ function appStateReducer(
         const newIndex = state.historyIndex - 1;
         return {
           ...state,
-          current: state.history[newIndex],
+          current: hydrateAppStateShape(state.history[newIndex]),
           historyIndex: newIndex,
         };
       }
@@ -212,7 +228,7 @@ function appStateReducer(
         const newIndex = state.historyIndex + 1;
         return {
           ...state,
-          current: state.history[newIndex],
+          current: hydrateAppStateShape(state.history[newIndex]),
           historyIndex: newIndex,
         };
       }
