@@ -37,43 +37,6 @@ export function calculateSimilarity(str1: string, str2: string): number {
   return 1 - distance / maxLength;
 }
 
-// Find similar names
-export function findSimilarNames(persons: Person[], threshold: number = 0.7): Array<{ person1: Person; person2: Person; similarity: number }> {
-  const similar: Array<{ person1: Person; person2: Person; similarity: number }> = [];
-
-  for (let i = 0; i < persons.length; i++) {
-    for (let j = i + 1; j < persons.length; j++) {
-      const similarity = calculateSimilarity(persons[i].name, persons[j].name);
-      if (similarity >= threshold && similarity < 1) {
-        similar.push({
-          person1: persons[i],
-          person2: persons[j],
-          similarity,
-        });
-      }
-    }
-  }
-
-  return similar;
-}
-
-// Find duplicate addresses/kitchens
-export function findDuplicateAddresses(persons: Person[]): Array<{ address: string; persons: Person[] }> {
-  const addressMap = new Map<string, Person[]>();
-
-  for (const person of persons) {
-    const normalizedAddress = person.kitchenAddress.trim().toLowerCase();
-    if (!addressMap.has(normalizedAddress)) {
-      addressMap.set(normalizedAddress, []);
-    }
-    addressMap.get(normalizedAddress)!.push(person);
-  }
-
-  return Array.from(addressMap.entries())
-    .filter(([_, persons]) => persons.length > 1)
-    .map(([address, persons]) => ({ address, persons }));
-}
-
 const VALID_PREF = ["vegan", "vegetarisch", "egal"] as const;
 const VALID_KITCHEN = [
   "kann_gekocht_werden",

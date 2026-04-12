@@ -7,13 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { Person } from "@/types/models";
-import {
-  findSimilarNames,
-  findDuplicateAddresses,
-  calculateSimilarity,
-  isCourseColumnMapped,
-  validatePreferences,
-} from "@/utils/matching";
+import { calculateSimilarity, isCourseColumnMapped, validatePreferences } from "@/utils/matching";
 import {
   formatCourseLabel,
   formatFoodPreferenceLabel,
@@ -34,18 +28,14 @@ import type { FoodPreference, KitchenStatus, CoursePreference } from "@/types/mo
 import { cn } from "@/lib/utils";
 
 interface DataIssue {
-  type: "similar_names" | "duplicate_address" | "validation";
   description: string;
   persons: Person[];
-  severity: "warning" | "error";
-  field?: string; // Feld, das den Fehler verursacht
-  personId?: string; // Person, die den Fehler hat
+  field?: string;
+  personId?: string;
 }
 
 function cellErrorClass(issues: DataIssue[]): string {
-  return issues.some((i) => i.severity === "error")
-    ? "border border-destructive/60 bg-destructive/10"
-    : "";
+  return issues.length > 0 ? "border border-destructive/60 bg-destructive/10" : "";
 }
 
 function normText(s: string | undefined): string {
@@ -530,30 +520,6 @@ export function Step2DataCleaning() {
 
     const detectedIssues: DataIssue[] = [];
 
-    // Similar names
-    const similarNames = findSimilarNames(persons, 0.7);
-    for (const { person1, person2, similarity } of similarNames) {
-      detectedIssues.push({
-        type: "similar_names",
-        description: `Ähnliche Namen gefunden (${Math.round(similarity * 100)}% Übereinstimmung)`,
-        persons: [person1, person2],
-        severity: "warning",
-      });
-    }
-
-    // Duplicate addresses
-    const duplicateAddresses = findDuplicateAddresses(persons);
-    for (const { address, persons: addressPersons } of duplicateAddresses) {
-      detectedIssues.push({
-        type: "duplicate_address",
-        description: `Gleiche Küchen-Adresse: ${address}`,
-        persons: addressPersons,
-        severity: "warning",
-        field: "kitchenAddress",
-      });
-    }
-
-    // Validation issues
     const validationIssues = validatePreferences(persons, state.columnMapping);
     for (const { person, issue } of validationIssues) {
       let field: string | undefined;
@@ -562,10 +528,8 @@ export function Step2DataCleaning() {
       else if (issue.includes("Gericht-Präferenz")) field = "coursePreference";
 
       detectedIssues.push({
-        type: "validation",
         description: issue,
         persons: [person],
-        severity: "error",
         field,
         personId: person.id,
       });
@@ -759,8 +723,7 @@ export function Step2DataCleaning() {
     return issues.filter((issue) => issue.personId === personId && issue.field === field);
   };
 
-  const errorCount = issues.filter((i) => i.severity === "error").length;
-  const warningCount = issues.filter((i) => i.severity === "warning").length;
+  const errorCount = issues.length;
 
   const kitchenOptions: KitchenStatus[] = ["kann_gekocht_werden", "partner_kocht", "kann_nicht_gekocht_werden"];
   const preferenceOptions: FoodPreference[] = ["vegan", "vegetarisch", "egal"];
@@ -771,11 +734,11 @@ export function Step2DataCleaning() {
       <div>
         <h2 className="text-2xl font-bold mb-2">Schritt 2: Daten-Cleaning</h2>
         <p className="text-muted-foreground">
-          Überprüfen Sie die Daten auf Duplikate, ähnliche Einträge und Validierungsfehler. Sie können Werte direkt in der Tabelle bearbeiten.
+          Überprüfen Sie die Daten auf Validierungsfehler. Sie können Werte direkt in der Tabelle bearbeiten.
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-2 gap-4">
         <div className="p-4 border rounded-md">
           <div className="text-2xl font-bold">{persons.length}</div>
           <div className="text-sm text-muted-foreground">Personen</div>
@@ -783,10 +746,6 @@ export function Step2DataCleaning() {
         <div className="p-4 border rounded-md">
           <div className="text-2xl font-bold text-destructive">{errorCount}</div>
           <div className="text-sm text-muted-foreground">Fehler</div>
-        </div>
-        <div className="p-4 border rounded-md">
-          <div className="text-2xl font-bold text-yellow-600">{warningCount}</div>
-          <div className="text-sm text-muted-foreground">Warnungen</div>
         </div>
       </div>
 
@@ -960,7 +919,7 @@ export function Step2DataCleaning() {
                   .map((mapping, index) => (
                     <div key={index} className="flex items-center justify-between p-2 border rounded">
                       <span className="text-sm">
-                        "{mapping.rawValue}" → {mapping.mappedValue}
+                        „{mapping.rawValue}“ → {formatSuggestedMapped(mapping.field, mapping.mappedValue)}
                       </span>
                       <Button
                         variant="ghost"
@@ -1077,13 +1036,11 @@ export function Step2DataCleaning() {
                               value={person.name}
                               onChange={(e) => handleUpdatePerson(person.id, "name", e.target.value)}
                               onBlur={() => setEditingPersonId(null)}
-                              className={nameIssues.some((i) => i.severity === "error") ? "border-destructive" : ""}
+                              className={nameIssues.length > 0 ? "border-destructive" : ""}
                             />
                           }
                           onViewClick={() => setEditingPersonId(person.id)}
-                          errorClassName={
-                            nameIssues.some((i) => i.severity === "error") ? "text-destructive font-medium" : undefined
-                          }
+                          errorClassName={nameIssues.length > 0 ? "text-destructive font-medium" : undefined}
                         />
                       </TableCell>
                       <TableCell className={cn(cellErrorClass(preferenceIssues))}>
@@ -1098,9 +1055,7 @@ export function Step2DataCleaning() {
                               onOpenChange={(open) => !open && setEditingPersonId(null)}
                             >
                               <SelectTrigger
-                                className={
-                                  preferenceIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
-                                }
+                                className={preferenceIssues.length > 0 ? "border-destructive" : ""}
                               >
                                 <SelectValue placeholder="Gültigen Wert wählen" />
                               </SelectTrigger>
@@ -1127,11 +1082,7 @@ export function Step2DataCleaning() {
                           </div>
                         ) : (
                           <div
-                            className={
-                              preferenceIssues.some((i) => i.severity === "error")
-                                ? "text-destructive font-medium"
-                                : ""
-                            }
+                            className={preferenceIssues.length > 0 ? "text-destructive font-medium" : ""}
                             onClick={() => setEditingPersonId(person.id)}
                             style={{ cursor: "pointer" }}
                           >
@@ -1192,9 +1143,7 @@ export function Step2DataCleaning() {
                               onOpenChange={(open) => !open && setEditingPersonId(null)}
                             >
                               <SelectTrigger
-                                className={
-                                  kitchenIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
-                                }
+                                className={kitchenIssues.length > 0 ? "border-destructive" : ""}
                               >
                                 <SelectValue placeholder="Gültigen Wert wählen" />
                               </SelectTrigger>
@@ -1225,11 +1174,7 @@ export function Step2DataCleaning() {
                           </div>
                         ) : (
                           <div
-                            className={
-                              kitchenIssues.some((i) => i.severity === "error")
-                                ? "text-destructive font-medium"
-                                : ""
-                            }
+                            className={kitchenIssues.length > 0 ? "text-destructive font-medium" : ""}
                             onClick={() => setEditingPersonId(person.id)}
                             style={{ cursor: "pointer" }}
                           >
@@ -1255,16 +1200,12 @@ export function Step2DataCleaning() {
                               value={person.kitchenAddress}
                               onChange={(e) => handleUpdatePerson(person.id, "kitchenAddress", e.target.value)}
                               onBlur={() => setEditingPersonId(null)}
-                              className={
-                                kitchenAddressIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
-                              }
+                              className={kitchenAddressIssues.length > 0 ? "border-destructive" : ""}
                             />
                           }
                           onViewClick={() => setEditingPersonId(person.id)}
                           errorClassName={
-                            kitchenAddressIssues.some((i) => i.severity === "error")
-                              ? "text-destructive font-medium"
-                              : undefined
+                            kitchenAddressIssues.length > 0 ? "text-destructive font-medium" : undefined
                           }
                         />
                       </TableCell>
@@ -1281,9 +1222,7 @@ export function Step2DataCleaning() {
                                 onOpenChange={(open) => !open && setEditingPersonId(null)}
                               >
                                 <SelectTrigger
-                                  className={
-                                    courseIssues.some((i) => i.severity === "error") ? "border-destructive" : ""
-                                  }
+                                  className={courseIssues.length > 0 ? "border-destructive" : ""}
                                 >
                                   <SelectValue placeholder="Gültigen Wert wählen" />
                                 </SelectTrigger>
@@ -1310,11 +1249,7 @@ export function Step2DataCleaning() {
                             </div>
                           ) : (
                             <div
-                              className={
-                                courseIssues.some((i) => i.severity === "error")
-                                  ? "text-destructive font-medium"
-                                  : ""
-                              }
+                              className={courseIssues.length > 0 ? "text-destructive font-medium" : ""}
                               onClick={() => setEditingPersonId(person.id)}
                               style={{ cursor: "pointer" }}
                             >
@@ -1364,18 +1299,9 @@ export function Step2DataCleaning() {
           <h3 className="text-lg font-semibold">Gefundene Probleme</h3>
           <div className="space-y-2">
             {issues.map((issue, index) => (
-              <div
-                key={index}
-                className={`p-4 border rounded-md ${
-                  issue.severity === "error" ? "border-destructive" : "border-yellow-500"
-                }`}
-              >
+              <div key={index} className="p-4 border border-destructive rounded-md">
                 <div className="flex items-start gap-2">
-                  {issue.severity === "error" ? (
-                    <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
-                  ) : (
-                    <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5" />
-                  )}
+                  <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />
                   <div className="flex-1">
                     <div className="font-medium">{issue.description}</div>
                     <div className="text-sm text-muted-foreground mt-1">

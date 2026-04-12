@@ -1,18 +1,80 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import type { Team, FoodPreference } from "@/types/models";
-import { Users, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import type { Team, FoodPreference, Person, KitchenStatus } from "@/types/models";
+import { formatKitchenLabel } from "@/utils/valueResolution";
+import { Users, Trash2, ChevronDown, ChevronUp, Wand2 } from "lucide-react";
 import { categorizePartnerFields } from "@/utils/partnerSuggestions";
 import {
+  computeAutoTeamAssignment,
+  type AutoTeamAssignmentResult,
+} from "@/utils/autoTeamAssignment";
+import {
   combinePreference,
-  hasUsableKitchen,
   preferenceRank,
   getTeamKitchenOptions,
+  countWastedTeamSlots,
+  getPersonIdsWithDuplicateTeamAssignments,
+  orphanTeamPersonIds,
 } from "@/utils/teamDerived";
+
+const KITCHEN_OPTIONS_ORDER: KitchenStatus[] = [
+  "kann_gekocht_werden",
+  "partner_kocht",
+  "kann_nicht_gekocht_werden",
+];
+
+function kitchenCountsByOption(persons: Person[]): {
+  rows: { status: KitchenStatus; count: number }[];
+  unset: number;
+} {
+  const counts = new Map<KitchenStatus, number>();
+  for (const k of KITCHEN_OPTIONS_ORDER) counts.set(k, 0);
+  let unset = 0;
+  for (const p of persons) {
+    const k = p.kitchen;
+    if (
+      k === "kann_gekocht_werden" ||
+      k === "partner_kocht" ||
+      k === "kann_nicht_gekocht_werden"
+    ) {
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    } else {
+      unset++;
+    }
+  }
+  return {
+    rows: KITCHEN_OPTIONS_ORDER.map((status) => ({ status, count: counts.get(status) ?? 0 })),
+    unset,
+  };
+}
+
+function kitchenRoleLabel(kitchen: string | undefined): string {
+  if (kitchen === "kann_gekocht_werden") return "mit eigener Küche";
+  if (kitchen === "partner_kocht") return "Küche beim Partner";
+  return "ohne Küche";
+}
+
+/** Wenn nicht null, darf der einseitige Vorschlag nicht übernommen werden (Grund für die UI). */
+function explainOneWayTeamBlock(
+  seeker: { id: string; name: string },
+  target: { id: string; name: string },
+  teamPersonIds: Set<string>
+): string | null {
+  const seekerBusy = teamPersonIds.has(seeker.id);
+  const targetBusy = teamPersonIds.has(target.id);
+  if (!seekerBusy && !targetBusy) return null;
+  if (seekerBusy && targetBusy) {
+    return `${seeker.name} und ${target.name} sind bereits jeweils einem Team zugeordnet.`;
+  }
+  if (seekerBusy) {
+    return `${seeker.name} ist bereits in einem Team.`;
+  }
+  return `${target.name} ist bereits in einem Team. Zum Übernehmen das bestehende Team zuerst auflösen oder die Zuordnung manuell anpassen.`;
+}
 
 function teamPersonIdSet(teams: { person1Id: string; person2Id: string }[]): Set<string> {
   return new Set(teams.flatMap((t) => [t.person1Id, t.person2Id]));
@@ -101,6 +163,7 @@ export function Step3TeamAssignment() {
   const [selectedPerson1, setSelectedPerson1] = useState<string>("");
   const [selectedPerson2, setSelectedPerson2] = useState<string>("");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [autoAssignment, setAutoAssignment] = useState<AutoTeamAssignmentResult | null>(null);
   const teamSortSpecs = useMemo(
     () =>
       state.step3SortSpecs.filter(
@@ -114,6 +177,19 @@ export function Step3TeamAssignment() {
   const availablePersons = useMemo(() => {
     return state.persons.filter((p) => !teamPersonIds.has(p.id));
   }, [state.persons, teamPersonIds]);
+
+  const wastedTeamSlots = useMemo(() => countWastedTeamSlots(state.teams), [state.teams]);
+  const duplicateTeamPersonIds = useMemo(
+    () => getPersonIdsWithDuplicateTeamAssignments(state.teams),
+    [state.teams]
+  );
+  const orphanTeamRefs = useMemo(
+    () => orphanTeamPersonIds(state.teams, state.persons),
+    [state.teams, state.persons]
+  );
+  const personsAssignedToTeams = state.persons.length - availablePersons.length;
+
+  const kitchenStats = useMemo(() => kitchenCountsByOption(state.persons), [state.persons]);
 
   const teamsWithDetails = useMemo(() => {
     return state.teams.map((team) => {
@@ -196,13 +272,41 @@ export function Step3TeamAssignment() {
     return partnerBuckets.personsWithEmptyPartner.filter((p) => !teamPersonIds.has(p.id));
   }, [partnerBuckets.personsWithEmptyPartner, teamPersonIds]);
 
-  const createTeamForPair = (person1Id: string, person2Id: string) => {
-    if (!person1Id || !person2Id || person1Id === person2Id) return;
+  const [teamPairFeedback, setTeamPairFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (teamPairFeedback === null) return;
+    const id = window.setTimeout(() => setTeamPairFeedback(null), 7000);
+    return () => window.clearTimeout(id);
+  }, [teamPairFeedback]);
+
+  /** @returns true wenn ein neues Team angelegt wurde */
+  const tryCreateTeamForPair = (person1Id: string, person2Id: string): boolean => {
+    if (!person1Id || !person2Id || person1Id === person2Id) {
+      setTeamPairFeedback("Bitte zwei verschiedene Personen wählen.");
+      return false;
+    }
 
     const person1 = state.persons.find((p) => p.id === person1Id);
     const person2 = state.persons.find((p) => p.id === person2Id);
 
-    if (!person1 || !person2) return;
+    if (!person1 || !person2) {
+      setTeamPairFeedback("Eine Person wurde nicht gefunden. Bitte Daten in Schritt 2 prüfen.");
+      return false;
+    }
+
+    if (teamPersonIds.has(person1Id) || teamPersonIds.has(person2Id)) {
+      const blocked: string[] = [];
+      if (teamPersonIds.has(person1Id)) blocked.push(person1.name);
+      if (teamPersonIds.has(person2Id)) blocked.push(person2.name);
+      const list = blocked.join(" und ");
+      setTeamPairFeedback(
+        blocked.length === 1
+          ? `${list} ist bereits in einem Team.`
+          : `${list} sind bereits in einem Team.`
+      );
+      return false;
+    }
 
     const newTeam: Team = {
       id: `team_${Date.now()}`,
@@ -215,13 +319,37 @@ export function Step3TeamAssignment() {
       payload: [...state.teams, newTeam],
     });
 
+    setTeamPairFeedback(null);
     setSelectedPerson1("");
     setSelectedPerson2("");
     setIsDialogOpen(false);
+    return true;
   };
 
   const handleCreateTeam = () => {
-    createTeamForPair(selectedPerson1, selectedPerson2);
+    tryCreateTeamForPair(selectedPerson1, selectedPerson2);
+  };
+
+  const runAutoTeamAssignment = () => {
+    setAutoAssignment(computeAutoTeamAssignment(availablePersons));
+  };
+
+  const acceptAutoPair = (a: Person, b: Person) => {
+    const ok = tryCreateTeamForPair(a.id, b.id);
+    if (!ok) return;
+    setAutoAssignment((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        pairs: prev.pairs.filter(
+          ([x, y]) =>
+            !(
+              (x.id === a.id && y.id === b.id) ||
+              (x.id === b.id && y.id === a.id)
+            )
+        ),
+      };
+    });
   };
 
   const handleDeleteTeam = (teamId: string) => {
@@ -232,7 +360,7 @@ export function Step3TeamAssignment() {
   };
 
   const suggestionRowClass =
-    "p-3 border rounded-md hover:bg-accent cursor-pointer flex items-center justify-between gap-3";
+    "p-3 border rounded-md flex flex-wrap items-center justify-between gap-3 bg-card";
 
   return (
     <div className="space-y-8">
@@ -244,14 +372,69 @@ export function Step3TeamAssignment() {
         </p>
       </div>
 
+      {teamPairFeedback && !isDialogOpen && (
+        <div
+          role="status"
+          className="rounded-md border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+        >
+          {teamPairFeedback}
+        </div>
+      )}
+
+      {(wastedTeamSlots > 0 || orphanTeamRefs.length > 0) && (
+        <div className="space-y-2 rounded-md border border-destructive/60 bg-destructive/10 p-4 text-sm">
+          {wastedTeamSlots > 0 && (
+            <p className="text-destructive">
+              <span className="font-medium">Doppelte Team-Zuordnung:</span> In den Teams kommen insgesamt{" "}
+              {wastedTeamSlots} Platz{wastedTeamSlots === 1 ? "" : "e"} mehrfach vor – dieselbe Person ist in
+              mehreren Teams (oder zweimal im selben Team) eingetragen. Dadurch wirkt die Zahl „Noch nicht in
+              einem Team“ höher als 84 − 2 × Anzahl Teams.
+            </p>
+          )}
+          {duplicateTeamPersonIds.length > 0 && (
+            <p className="text-muted-foreground">
+              Betroffene Personen:{" "}
+              {duplicateTeamPersonIds
+                .map((id) => state.persons.find((p) => p.id === id)?.name ?? id)
+                .join(", ")}
+            </p>
+          )}
+          {orphanTeamRefs.length > 0 && (
+            <p className="text-destructive">
+              <span className="font-medium">Hinweis:</span> {orphanTeamRefs.length} Team-Verweis
+              {orphanTeamRefs.length === 1 ? "" : "e"} zeigt auf Person-IDs, die in der aktuellen Liste nicht
+              vorkommen (häufig nach erneutem CSV-Import). Betroffene Teams zeigen „?“ in der Tabelle.
+            </p>
+          )}
+        </div>
+      )}
+
       <div className="grid grid-cols-3 gap-4">
         <div className="p-4 border rounded-md">
           <div className="text-2xl font-bold">{state.persons.length}</div>
           <div className="text-sm text-muted-foreground">Personen gesamt</div>
+          <div className="mt-2 space-y-0.5 border-t pt-2 text-xs text-muted-foreground">
+            {kitchenStats.rows.map(({ status, count }) => (
+              <div key={status} className="flex justify-between gap-3">
+                <span>{formatKitchenLabel(status)}</span>
+                <span className="tabular-nums font-medium text-foreground">{count}</span>
+              </div>
+            ))}
+            {kitchenStats.unset > 0 && (
+              <div className="flex justify-between gap-3">
+                <span>nicht gesetzt</span>
+                <span className="tabular-nums font-medium text-foreground">{kitchenStats.unset}</span>
+              </div>
+            )}
+          </div>
         </div>
         <div className="p-4 border rounded-md">
           <div className="text-2xl font-bold">{availablePersons.length}</div>
           <div className="text-sm text-muted-foreground">Noch nicht in einem Team</div>
+          <div className="text-xs text-muted-foreground mt-1">
+            {personsAssignedToTeams} eindeutig zugeordnet · {state.teams.length * 2} Plätze in {state.teams.length}{" "}
+            Teams
+          </div>
         </div>
         <div className="p-4 border rounded-md">
           <div className="text-2xl font-bold">{state.teams.length}</div>
@@ -312,18 +495,16 @@ export function Step3TeamAssignment() {
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-2">
                         {kitchenOptions.length > 0 ? (
-                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
-                            {kitchenOptions[0]}
-                          </span>
+                          kitchenOptions.map((addr, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium"
+                            >
+                              {addr}
+                            </span>
+                          ))
                         ) : (
-                          <span className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium">
-                            ?
-                          </span>
-                        )}
-                        {kitchenOptions[1] && (
-                          <span className="inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium">
-                            {kitchenOptions[1]}
-                          </span>
+                          <span className="text-sm text-destructive italic">Keine Küche vorhanden</span>
                         )}
                       </div>
                     </TableCell>
@@ -358,17 +539,20 @@ export function Step3TeamAssignment() {
         ) : (
           <div className="grid gap-2">
             {mutualPairsVisible.map(({ person1, person2 }) => (
-              <div
-                key={`${person1.id}-${person2.id}`}
-                className={suggestionRowClass}
-                onClick={() => createTeamForPair(person1.id, person2.id)}
-              >
+              <div key={`${person1.id}-${person2.id}`} className={suggestionRowClass}>
                 <div>
                   <span className="font-medium">{person1.name}</span>
                   {" · "}
                   <span className="font-medium">{person2.name}</span>
                 </div>
-                <span className="text-sm text-muted-foreground shrink-0">Als Team übernehmen</span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => tryCreateTeamForPair(person1.id, person2.id)}
+                >
+                  Als Team übernehmen
+                </Button>
               </div>
             ))}
           </div>
@@ -388,13 +572,10 @@ export function Step3TeamAssignment() {
             {oneWayVisible.map(({ seeker, target }) => {
               const seekerChoice = seeker.partner?.trim() ?? "";
               const targetPartner = target.partner?.trim();
+              const blockReason = explainOneWayTeamBlock(seeker, target, teamPersonIds);
               return (
-              <div
-                key={`${seeker.id}-${target.id}`}
-                className={suggestionRowClass}
-                onClick={() => createTeamForPair(seeker.id, target.id)}
-              >
-                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0">
+              <div key={`${seeker.id}-${target.id}`} className={suggestionRowClass}>
+                <div className="flex flex-wrap items-baseline gap-x-1 gap-y-0 min-w-0 flex-1">
                   <span className="font-medium">{seeker.name}</span>
                   <span className="text-foreground"> -&gt; </span>
                   <span className="text-foreground/55 dark:text-foreground/60">
@@ -408,7 +589,20 @@ export function Step3TeamAssignment() {
                     </span>
                   ) : null}
                 </div>
-                <span className="text-sm text-muted-foreground shrink-0">Übernehmen</span>
+                {blockReason ? (
+                  <p className="text-sm text-muted-foreground max-w-xs sm:max-w-md text-right leading-snug shrink-0">
+                    {blockReason}
+                  </p>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => tryCreateTeamForPair(seeker.id, target.id)}
+                  >
+                    Übernehmen
+                  </Button>
+                )}
               </div>
             );
             })}
@@ -457,68 +651,133 @@ export function Step3TeamAssignment() {
         )}
       </section>
 
-      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogTrigger asChild>
-          <Button>
-            <Users className="mr-2 h-4 w-4" />
-            Neues Team erstellen
-          </Button>
-        </DialogTrigger>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Neues Team erstellen</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Person 1</label>
-              <Select value={selectedPerson1} onValueChange={setSelectedPerson1}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Person auswählen" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePersons.map((person) => (
-                    <SelectItem key={person.id} value={person.id}>
-                      {person.name} (
-                      {hasUsableKitchen(person.kitchen)
-                        ? "mit Küche"
-                        : "ohne Küche"}
-                      )
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Person 2</label>
-              <Select value={selectedPerson2} onValueChange={setSelectedPerson2}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Person auswählen" />
-                </SelectTrigger>
-                <SelectContent>
-                  {availablePersons
-                    .filter((p) => p.id !== selectedPerson1)
-                    .map((person) => (
+      <div className="flex flex-wrap gap-2">
+        <Dialog
+          open={isDialogOpen}
+          onOpenChange={(open) => {
+            setIsDialogOpen(open);
+            if (open) setTeamPairFeedback(null);
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button type="button">
+              <Users className="mr-2 h-4 w-4" />
+              Neues Team erstellen
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Neues Team erstellen</DialogTitle>
+            </DialogHeader>
+            {teamPairFeedback && (
+              <div
+                role="status"
+                className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+              >
+                {teamPairFeedback}
+              </div>
+            )}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Person 1</label>
+                <Select value={selectedPerson1} onValueChange={setSelectedPerson1}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Person auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePersons.map((person) => (
                       <SelectItem key={person.id} value={person.id}>
-                        {person.name} (
-                        {hasUsableKitchen(person.kitchen)
-                          ? "mit Küche"
-                          : "ohne Küche"}
-                        )
+                        {person.name} ({kitchenRoleLabel(person.kitchen)})
                       </SelectItem>
                     ))}
-                </SelectContent>
-              </Select>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Person 2</label>
+                <Select value={selectedPerson2} onValueChange={setSelectedPerson2}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Person auswählen" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePersons
+                      .filter((p) => p.id !== selectedPerson1)
+                      .map((person) => (
+                        <SelectItem key={person.id} value={person.id}>
+                          {person.name} ({kitchenRoleLabel(person.kitchen)})
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                type="button"
+                onClick={handleCreateTeam}
+                disabled={!selectedPerson1 || !selectedPerson2}
+                className="w-full"
+              >
+                Team erstellen
+              </Button>
             </div>
-            <Button
-              onClick={handleCreateTeam}
-              disabled={!selectedPerson1 || !selectedPerson2}
-              className="w-full"
-            >
-              Team erstellen
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+          </DialogContent>
+        </Dialog>
+        <Button type="button" variant="outline" onClick={runAutoTeamAssignment}>
+          <Wand2 className="mr-2 h-4 w-4" />
+          Automatisch zuordnen
+        </Button>
+      </div>
+
+      {autoAssignment !== null && (
+        <section className="space-y-2">
+          <h3 className="text-lg font-semibold">Automatisch vorgeschlagene Teams</h3>
+          <p className="text-sm text-muted-foreground">
+            Vorschlag nur aus Personen ohne Team. Erneut auf „Automatisch zuordnen“ klicken, um neu zu
+            mischen. „Übernehmen“ legt das jeweilige Paar als Team an.
+          </p>
+          {autoAssignment.pairs.length === 0 && autoAssignment.unmatched.length === 0 ? (
+            <p className="text-sm text-muted-foreground border rounded-md p-4">
+              Keine freien Personen — alle sind bereits Teams zugeordnet.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {autoAssignment.pairs.map(([p1, p2], idx) => (
+                <div
+                  key={`${p1.id}-${p2.id}-${idx}`}
+                  className={suggestionRowClass}
+                >
+                  <div>
+                    <span className="font-medium">{p1.name}</span>
+                    {" · "}
+                    <span className="font-medium">{p2.name}</span>
+                    <span className="text-xs text-muted-foreground ml-2">
+                      ({kitchenRoleLabel(p1.kitchen)} / {kitchenRoleLabel(p2.kitchen)})
+                    </span>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => acceptAutoPair(p1, p2)}
+                  >
+                    Übernehmen
+                  </Button>
+                </div>
+              ))}
+              {autoAssignment.unmatched.map(({ person, reason }) => (
+                <div
+                  key={person.id}
+                  className={`${suggestionRowClass} border-destructive/50 bg-destructive/5`}
+                >
+                  <span className="font-medium text-destructive">{person.name}</span>
+                  <p className="text-sm text-destructive text-right max-w-md leading-snug shrink-0">
+                    {reason}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   );
 }

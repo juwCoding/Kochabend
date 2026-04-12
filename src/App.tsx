@@ -10,6 +10,7 @@ import { Step5Invitations } from "@/components/steps/Step5Invitations";
 import { Undo2, Redo2, Download, Upload } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { isStep2Valid } from "@/utils/matching";
+import { isStep3Valid } from "@/utils/teamDerived";
 import { clampWizardStepIndex } from "@/types/models";
 
 const STEPS = [
@@ -75,7 +76,14 @@ function AppContent() {
 
   const step1Done = isStep1Complete();
   const step2Done = isStep2Valid(state.persons, state.columnMapping);
-  const maxReachableStep = !step1Done ? 0 : !step2Done ? 1 : STEPS.length - 1;
+  const step3Done = isStep3Valid(state.teams, state.persons);
+  const maxReachableStep = !step1Done
+    ? 0
+    : !step2Done
+      ? 1
+      : !step3Done
+        ? 2
+        : STEPS.length - 1;
 
   return (
     <div className="min-h-screen bg-background">
@@ -141,7 +149,9 @@ function AppContent() {
                 ? step1Done
                 : currentStep === 1
                   ? step2Done
-                  : true
+                  : currentStep === 2
+                    ? step3Done
+                    : true
             }
           >
             <CurrentStepComponent />
