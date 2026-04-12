@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import type { Course, Distribution, Team } from "@/types/models";
 import { createDistribution } from "@/utils/distribution";
+import { DistributionFlowVisualization } from "@/components/DistributionFlowVisualization";
 import { formatCookSnapshotLine, formatHostSnapshotLine } from "@/utils/distributionDisplay";
 import { Sparkles, AlertCircle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -212,6 +213,21 @@ export function Step4Distribution() {
         <p className="text-sm text-muted-foreground">
           Alle {state.teams.length} Teams sind in der Verteilung enthalten.
         </p>
+      )}
+
+      {state.distribution.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-lg font-semibold">Abend-Routen</h3>
+          <p className="text-sm text-muted-foreground">
+            Drei Gänge als Spalten: Pro Runde treffen sich Gastgeber und Gäste in einer Bubble. Die farbigen
+            Pfeile folgen jedem Team durch den Abend.
+          </p>
+          <DistributionFlowVisualization
+            distribution={state.distribution}
+            teams={state.teams}
+            persons={state.persons}
+          />
+        </div>
       )}
 
       {state.distribution.length > 0 && (
