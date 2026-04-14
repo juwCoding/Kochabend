@@ -13,9 +13,9 @@ import {
   type AutoTeamAssignmentResult,
 } from "@/utils/autoTeamAssignment";
 import {
-  combinePreference,
   preferenceRank,
   getTeamKitchenOptions,
+  getTeamPreference,
   getTeamCoursePreferences,
   countWastedTeamSlots,
   getPersonIdsWithDuplicateTeamAssignments,
@@ -208,10 +208,12 @@ export function Step3TeamAssignment() {
       const kitchenOptions = getTeamKitchenOptions(team, state.persons);
       const coursePreferences = getTeamCoursePreferences(team, state.persons, shouldShowCoursePreferences);
 
-      const person1Preference = person1?.preference ?? "egal";
-      const person2Preference = person2?.preference ?? "egal";
-      const chosenPreference = combinePreference(person1Preference, person2Preference);
+      const person1Preference = person1?.preference;
+      const person2Preference = person2?.preference;
+      const chosenPreference = getTeamPreference(team, state.persons);
       const preferenceNote =
+        person1Preference &&
+        person2Preference &&
         person1Preference !== person2Preference
           ? preferenceRank(person1Preference) >= preferenceRank(person2Preference)
             ? `(${person2?.name ?? "?"}: ${person2Preference})`

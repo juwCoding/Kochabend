@@ -1,5 +1,5 @@
 import type { Person, Team, Distribution } from "@/types/models";
-import { formatHostSnapshotUnd } from "@/utils/distributionDisplay";
+import { formatCookSnapshotUnd } from "@/utils/distributionDisplay";
 import { getTeamKitchenOptions, getTeamPreference } from "@/utils/teamDerived";
 import {
   formatCourseLabel,
@@ -55,6 +55,7 @@ export function replacePlaceholders(
   person: Person,
   team: Team | undefined,
   distribution: Distribution | undefined,
+  allDistributions: Distribution[],
   allPersons: Person[],
   allTeams: Team[],
   customFields: Record<string, string>,
@@ -101,10 +102,25 @@ export function replacePlaceholders(
     result = result.replace(/\{\{KochtGang\}\}/g, distribution.course);
     result = result.replace(/\{\{KochtKüche\}\}/g, distribution.kitchenId);
 
-    // Guest relations
-    if (distribution.guestRelations.length > 0) {
-      const relation1 = distribution.guestRelations[0];
-      const hostTeam1 = allTeams.find((t) => t.id === relation1.hostTeamId);
+    const courseOrder: Record<Distribution["course"], number> = {
+      Vorspeise: 0,
+      Hauptgang: 1,
+      Nachspeise: 2,
+    };
+    const hostVisits = allDistributions
+      .filter((d) => {
+        const guestTeamIds = Array.isArray(d.guestTeamIds)
+          ? d.guestTeamIds
+          : [d.guestTeam1Id, d.guestTeam2Id].filter(
+              (id): id is string => typeof id === "string" && id.length > 0
+            );
+        return guestTeamIds.includes(distribution.cookTeamId);
+      })
+      .sort((a, b) => courseOrder[a.course] - courseOrder[b.course]);
+
+    const host1 = hostVisits[0];
+    if (host1) {
+      const hostTeam1 = allTeams.find((t) => t.id === host1.cookTeamId);
       const hostPerson1_1 = hostTeam1
         ? allPersons.find((p) => p.id === hostTeam1.person1Id)
         : null;
@@ -116,20 +132,19 @@ export function replacePlaceholders(
           ? `${hostPerson1_1.name} und ${hostPerson1_2.name}`
           : "";
       if (!hostNames1) {
-        const fromSnap = formatHostSnapshotUnd(relation1);
+        const fromSnap = formatCookSnapshotUnd(host1);
         if (fromSnap) hostNames1 = fromSnap;
       }
-
       result = result.replace(/\{\{IsstBei1\}\}/g, hostNames1);
-      result = result.replace(/\{\{IsstBei1Gang\}\}/g, relation1.course);
+      result = result.replace(/\{\{IsstBei1Gang\}\}/g, host1.course);
     } else {
       result = result.replace(/\{\{IsstBei1\}\}/g, "");
       result = result.replace(/\{\{IsstBei1Gang\}\}/g, "");
     }
 
-    if (distribution.guestRelations.length > 1) {
-      const relation2 = distribution.guestRelations[1];
-      const hostTeam2 = allTeams.find((t) => t.id === relation2.hostTeamId);
+    const host2 = hostVisits[1];
+    if (host2) {
+      const hostTeam2 = allTeams.find((t) => t.id === host2.cookTeamId);
       const hostPerson2_1 = hostTeam2
         ? allPersons.find((p) => p.id === hostTeam2.person1Id)
         : null;
@@ -141,12 +156,11 @@ export function replacePlaceholders(
           ? `${hostPerson2_1.name} und ${hostPerson2_2.name}`
           : "";
       if (!hostNames2) {
-        const fromSnap = formatHostSnapshotUnd(relation2);
+        const fromSnap = formatCookSnapshotUnd(host2);
         if (fromSnap) hostNames2 = fromSnap;
       }
-
       result = result.replace(/\{\{IsstBei2\}\}/g, hostNames2);
-      result = result.replace(/\{\{IsstBei2Gang\}\}/g, relation2.course);
+      result = result.replace(/\{\{IsstBei2Gang\}\}/g, host2.course);
     } else {
       result = result.replace(/\{\{IsstBei2\}\}/g, "");
       result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
@@ -187,13 +201,14 @@ export function generateAllInvitations(
     const team = teams.find(
       (t) => t.person1Id === person.id || t.person2Id === person.id
     );
-    const distribution = distributions.find((d) => d.teamId === team?.id);
+    const distribution = distributions.find((d) => d.cookTeamId === team?.id);
 
     invitations[person.id] = replacePlaceholders(
       template,
       person,
       team,
       distribution,
+      distributions,
       persons,
       teams,
       customFields,

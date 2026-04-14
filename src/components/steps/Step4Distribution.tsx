@@ -5,7 +5,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import type { Course, Distribution, Team } from "@/types/models";
 import { createDistribution } from "@/utils/distribution";
 import { DistributionFlowVisualization } from "@/components/DistributionFlowVisualization";
-import { formatCookSnapshotLine, formatHostSnapshotLine } from "@/utils/distributionDisplay";
+import { formatCookSnapshotLine, formatGuestSnapshotLine } from "@/utils/distributionDisplay";
+import { getTeamPreference } from "@/utils/teamDerived";
 import { Sparkles, AlertCircle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -15,13 +16,27 @@ function teamMemberLine(team: Team, persons: { id: string; name: string }[]): st
   return [p1?.name, p2?.name].filter(Boolean).join(" + ") || "Unbekanntes Team";
 }
 
+function aggregateMealPreference(preferences: string[]): string {
+  if (preferences.some((preference) => preference === "vegan")) return "vegan";
+  if (preferences.some((preference) => preference === "vegetarisch")) return "vegetarisch";
+  return "egal";
+}
+
 export function Step4Distribution() {
   const { state, dispatch } = useAppState();
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const teamPreferenceById = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const team of state.teams) {
+      byId.set(team.id, getTeamPreference(team, state.persons));
+    }
+    return byId;
+  }, [state.teams, state.persons]);
+
   const distributedTeamIds = useMemo(
-    () => new Set(state.distribution.map((d) => d.teamId)),
+    () => new Set(state.distribution.map((d) => d.cookTeamId)),
     [state.distribution]
   );
 
@@ -33,7 +48,7 @@ export function Step4Distribution() {
   const hasOrphanDistributionTeam = useMemo(
     () =>
       state.distribution.some(
-        (d) => !state.teams.some((t) => t.id === d.teamId)
+        (d) => !state.teams.some((t) => t.id === d.cookTeamId)
       ),
     [state.distribution, state.teams]
   );
@@ -46,7 +61,7 @@ export function Step4Distribution() {
       Nachspeise: [],
     };
     for (const dist of state.distribution) {
-      const team = state.teams.find((t) => t.id === dist.teamId) ?? null;
+      const team = state.teams.find((t) => t.id === dist.cookTeamId) ?? null;
       byCourse[dist.course].push({ dist, team });
     }
     return byCourse;
@@ -71,7 +86,7 @@ export function Step4Distribution() {
 
   // Get team and person details for display
   const distributionWithDetails = state.distribution.map((dist) => {
-    const team = state.teams.find((t) => t.id === dist.teamId);
+    const team = state.teams.find((t) => t.id === dist.cookTeamId);
     const person1 = team
       ? state.persons.find((p) => p.id === team.person1Id)
       : null;
@@ -79,21 +94,40 @@ export function Step4Distribution() {
       ? state.persons.find((p) => p.id === team.person2Id)
       : null;
 
-    const guestDetails = dist.guestRelations.map((relation) => {
-      const hostTeam = state.teams.find((t) => t.id === relation.hostTeamId);
-      const hostPerson1 = hostTeam
-        ? state.persons.find((p) => p.id === hostTeam.person1Id)
-        : null;
-      const hostPerson2 = hostTeam
-        ? state.persons.find((p) => p.id === hostTeam.person2Id)
-        : null;
-      return {
-        relation,
-        hostTeam,
-        hostPerson1,
-        hostPerson2,
-      };
-    });
+    const guestTeamIds = Array.isArray(dist.guestTeamIds)
+      ? dist.guestTeamIds
+      : [dist.guestTeam1Id, dist.guestTeam2Id].filter(
+          (guestTeamId): guestTeamId is string => typeof guestTeamId === "string" && guestTeamId.length > 0
+        );
+
+    const guestDetails = guestTeamIds
+      .map((guestTeamId, idx) => ({
+        guestTeamId,
+        snapshotLabel: formatGuestSnapshotLine(dist, idx + 1),
+      }))
+      .map((guest) => {
+        const guestTeam = state.teams.find((t) => t.id === guest.guestTeamId);
+        const guestPerson1 = guestTeam
+          ? state.persons.find((p) => p.id === guestTeam.person1Id)
+          : null;
+        const guestPerson2 = guestTeam
+          ? state.persons.find((p) => p.id === guestTeam.person2Id)
+          : null;
+        return {
+          ...guest,
+          guestTeam,
+          guestPerson1,
+          guestPerson2,
+          guestPreference: guestTeam
+            ? teamPreferenceById.get(guestTeam.id) ?? "egal"
+            : null,
+        };
+      });
+
+    const mealPreferences = [
+      team ? teamPreferenceById.get(team.id) ?? "egal" : null,
+      ...guestDetails.map((guest) => guest.guestPreference),
+    ].filter((value): value is string => typeof value === "string" && value.length > 0);
 
     return {
       dist,
@@ -101,6 +135,7 @@ export function Step4Distribution() {
       person1,
       person2,
       guestDetails,
+      mealPreference: aggregateMealPreference(mealPreferences),
     };
   });
 
@@ -161,7 +196,7 @@ export function Step4Distribution() {
                   <ul className="text-sm space-y-1.5 list-disc list-inside">
                     {rowsHere.map(({ dist, team }) => (
                       <li
-                        key={dist.teamId}
+                        key={dist.cookTeamId}
                         className={cn(
                           "rounded-md px-2 py-1.5 -mx-2",
                           team
@@ -236,20 +271,21 @@ export function Step4Distribution() {
                   <TableHead>Team</TableHead>
                   <TableHead>Kocht</TableHead>
                   <TableHead>Küche</TableHead>
-                  <TableHead>Isst bei</TableHead>
+                  <TableHead>Ernährungsform</TableHead>
+                  <TableHead>Gäste</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {distributionWithDetails.map(({ dist, team, person1, person2, guestDetails }) => (
+                {distributionWithDetails.map(({ dist, team, person1, person2, guestDetails, mealPreference }) => (
                   <TableRow
-                    key={dist.teamId}
+                    key={dist.cookTeamId}
                     className={cn(!team && "bg-amber-100/80 dark:bg-amber-950/30")}
                   >
                     <TableCell>
                       {team ? (
-                        <div>
+                        <div className="space-y-0.5">
                           <div>{person1?.name}</div>
-                          <div className="text-sm text-muted-foreground">{person2?.name}</div>
+                          <div>{person2?.name}</div>
                         </div>
                       ) : (
                         <div className="rounded-md border border-amber-300/80 dark:border-amber-700/80 bg-amber-100 dark:bg-amber-950/40 px-2 py-1.5 text-sm">
@@ -267,44 +303,38 @@ export function Step4Distribution() {
                     </TableCell>
                     <TableCell>{dist.kitchenId}</TableCell>
                     <TableCell>
+                      <span className="font-medium">{mealPreference}</span>
+                    </TableCell>
+                    <TableCell>
                       <div className="space-y-1">
-                        {guestDetails.map(({ relation, hostTeam, hostPerson1, hostPerson2 }, idx) => (
+                        {guestDetails.map(({ guestTeam, guestPerson1, guestPerson2, snapshotLabel, guestPreference }, idx) => (
                           <div
                             key={idx}
                             className={cn(
                               "text-sm rounded-md px-2 py-1 -mx-2",
-                              !hostTeam &&
+                              !guestTeam &&
                                 "bg-amber-100 text-amber-950 dark:bg-amber-950/40 dark:text-amber-100 border border-amber-300/80 dark:border-amber-700/80"
                             )}
                           >
-                            {hostTeam ? (
+                            {guestTeam ? (
                               <>
                                 <span className="font-medium">
-                                  {hostPerson1?.name} + {hostPerson2?.name}
+                                  {guestPerson1?.name} + {guestPerson2?.name}
                                 </span>
-                                <span className="text-muted-foreground ml-2">
-                                  ({courseLabels[relation.course]})
+                                <span className="ml-2 text-xs text-muted-foreground">
+                                  ({guestPreference ?? "egal"})
                                 </span>
                               </>
                             ) : (
                               <span>
                                 <span className="font-medium">
-                                  Gastgeber-Team nicht mehr in Schritt 3
+                                  Gast-Team nicht mehr in Schritt 3
                                 </span>
-                                <span className="text-muted-foreground">
-                                  {" "}
-                                  ({courseLabels[relation.course]})
-                                </span>
-                                <span className="block text-sm mt-0.5">{formatHostSnapshotLine(relation)}</span>
+                                <span className="block text-sm mt-0.5">{snapshotLabel}</span>
                               </span>
                             )}
                           </div>
                         ))}
-                        {guestDetails.length < 2 && (
-                          <div className="text-sm text-destructive">
-                            Fehlt: {2 - guestDetails.length} Gastgeber
-                          </div>
-                        )}
                       </div>
                     </TableCell>
                   </TableRow>

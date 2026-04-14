@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Course, Distribution, Team } from "@/types/models";
-import { formatCookSnapshotLine } from "@/utils/distributionDisplay";
+import type { Course, Distribution, Person, Team } from "@/types/models";
+import { getTeamPreference } from "@/utils/teamDerived";
 import { cn } from "@/lib/utils";
 
 const COURSE_ORDER: Course[] = ["Vorspeise", "Hauptgang", "Nachspeise"];
@@ -16,78 +16,54 @@ type MealBubble = {
   hostTeamId: string;
   guestTeamIds: string[];
   kitchenId: string;
+  mealPreference: string;
 };
 
-function buildMealsByCourse(distribution: Distribution[]): Record<Course, MealBubble[]> {
+function aggregateMealPreference(preferences: string[]): string {
+  if (preferences.some((preference) => preference === "vegan")) return "vegan";
+  if (preferences.some((preference) => preference === "vegetarisch")) return "vegetarisch";
+  return "egal";
+}
+
+function buildMealsByCourse(
+  distribution: Distribution[],
+  teamPreferenceById: Map<string, string>
+): Record<Course, MealBubble[]> {
   const byCourse: Record<Course, MealBubble[]> = {
     Vorspeise: [],
     Hauptgang: [],
     Nachspeise: [],
   };
 
-  const allTeamIds = distribution.map((d) => d.teamId);
-
   for (const course of COURSE_ORDER) {
     const hosts = distribution.filter((d) => d.course === course);
-    const hostIds = new Set(hosts.map((h) => h.teamId));
-    const diners = allTeamIds.filter((teamId) => !hostIds.has(teamId));
-
     const preferredHosts = new Map<string, string[]>();
-    for (const teamId of diners) {
-      const d = distribution.find((dist) => dist.teamId === teamId);
-      const hostsForCourse = (d?.guestRelations ?? [])
-        .filter((r) => r.course === course && hostIds.has(r.hostTeamId))
-        .map((r) => r.hostTeamId);
-      preferredHosts.set(teamId, [...new Set(hostsForCourse)]);
-    }
-
-    const guestsByHost = new Map<string, string[]>();
-    for (const host of hosts) guestsByHost.set(host.teamId, []);
-
-    const dinersByConstraint = [...diners].sort(
-      (a, b) => (preferredHosts.get(a)?.length ?? 0) - (preferredHosts.get(b)?.length ?? 0)
-    );
-
-    const unassigned: string[] = [];
-    for (const dinerTeamId of dinersByConstraint) {
-      const prefs = preferredHosts.get(dinerTeamId) ?? [];
-      let selectedHostId: string | null = null;
-      let selectedLoad = Number.POSITIVE_INFINITY;
-
-      for (const hostId of prefs) {
-        const load = guestsByHost.get(hostId)?.length ?? Number.POSITIVE_INFINITY;
-        if (load < 2 && load < selectedLoad) {
-          selectedHostId = hostId;
-          selectedLoad = load;
-        }
-      }
-
-      if (!selectedHostId) {
-        unassigned.push(dinerTeamId);
-        continue;
-      }
-
-      guestsByHost.get(selectedHostId)?.push(dinerTeamId);
-    }
-
-    for (const dinerTeamId of unassigned) {
-      const fallbackHost = hosts
-        .map((h) => ({ hostId: h.teamId, load: guestsByHost.get(h.teamId)?.length ?? 0 }))
-        .filter((entry) => entry.load < 2)
-        .sort((a, b) => a.load - b.load)[0];
-      if (fallbackHost) {
-        guestsByHost.get(fallbackHost.hostId)?.push(dinerTeamId);
-      }
+    for (const host of hosts) {
+      const guestTeamIds = Array.isArray(host.guestTeamIds)
+        ? host.guestTeamIds
+        : [host.guestTeam1Id, host.guestTeam2Id].filter(
+            (id): id is string => typeof id === "string" && id.length > 0
+          );
+      preferredHosts.set(
+        host.cookTeamId,
+        guestTeamIds
+      );
     }
 
     for (let hi = 0; hi < hosts.length; hi++) {
       const host = hosts[hi];
-      const bubbleId = `${host.teamId}-${course}-${hi}`;
+      const bubbleId = `${host.cookTeamId}-${course}-${hi}`;
+      const guestTeamIds = preferredHosts.get(host.cookTeamId) ?? [];
+      const mealPreference = aggregateMealPreference([
+        teamPreferenceById.get(host.cookTeamId) ?? "egal",
+        ...guestTeamIds.map((guestTeamId) => teamPreferenceById.get(guestTeamId) ?? "egal"),
+      ]);
       byCourse[course].push({
         bubbleId,
-        hostTeamId: host.teamId,
-        guestTeamIds: (guestsByHost.get(host.teamId) ?? []).slice(0, 2),
+        hostTeamId: host.cookTeamId,
+        guestTeamIds,
         kitchenId: host.kitchenId,
+        mealPreference,
       });
     }
   }
@@ -104,7 +80,15 @@ function teamHue(teamId: string): number {
 }
 
 function collectTeamIds(distribution: Distribution[]): string[] {
-  const s = new Set(distribution.map((d) => d.teamId));
+  const s = new Set(distribution.map((d) => d.cookTeamId));
+  for (const d of distribution) {
+    const guestTeamIds = Array.isArray(d.guestTeamIds)
+      ? d.guestTeamIds
+      : [d.guestTeam1Id, d.guestTeam2Id].filter(
+          (id): id is string => typeof id === "string" && id.length > 0
+        );
+    for (const guestTeamId of guestTeamIds) s.add(guestTeamId);
+  }
   return [...s];
 }
 
@@ -145,7 +129,7 @@ export function DistributionFlowVisualization({
 }: {
   distribution: Distribution[];
   teams: Team[];
-  persons: { id: string; name: string }[];
+  persons: Person[];
 }) {
   const [hoveredTeamId, setHoveredTeamId] = useState<string | null>(null);
   const [paths, setPaths] = useState<
@@ -174,10 +158,21 @@ export function DistributionFlowVisualization({
     [scheduleLayout]
   );
 
-  const mealsByCourse = useMemo(() => buildMealsByCourse(distribution), [distribution]);
+  const teamPreferenceById = useMemo(() => {
+    const byId = new Map<string, string>();
+    for (const team of teams) {
+      byId.set(team.id, getTeamPreference(team, persons));
+    }
+    return byId;
+  }, [teams, persons]);
+
+  const mealsByCourse = useMemo(
+    () => buildMealsByCourse(distribution, teamPreferenceById),
+    [distribution, teamPreferenceById]
+  );
   const distByTeam = useMemo(() => {
     const m = new Map<string, Distribution>();
-    for (const d of distribution) m.set(d.teamId, d);
+    for (const d of distribution) m.set(d.cookTeamId, d);
     return m;
   }, [distribution]);
 
@@ -193,8 +188,12 @@ export function DistributionFlowVisualization({
         if (line) return line;
       }
       const d = distByTeam.get(teamId);
-      if (d) return formatCookSnapshotLine(d);
-      return teamId.length > 26 ? `${teamId.slice(0, 24)}…` : teamId;
+      const snapshotNames = d?.cookTeamNamesSnapshot
+        ?.split(",")
+        .map((name) => name.trim())
+        .filter(Boolean);
+      if (snapshotNames && snapshotNames.length > 0) return snapshotNames.join(" + ");
+      return teamId;
     },
     [distByTeam, teams, persons]
   );
@@ -289,6 +288,7 @@ export function DistributionFlowVisualization({
                       nodeKey={`${meal.hostTeamId}|${course}|${meal.bubbleId}|host`}
                       teamId={meal.hostTeamId}
                       role="kocht"
+                      preference={teamPreferenceById.get(meal.hostTeamId) ?? "egal"}
                       label={resolveLabel(meal.hostTeamId)}
                       teams={teams}
                       hoveredTeamId={hoveredTeamId}
@@ -301,6 +301,7 @@ export function DistributionFlowVisualization({
                         nodeKey={`${gid}|${course}|${meal.bubbleId}|gast`}
                         teamId={gid}
                         role="Gast"
+                        preference={teamPreferenceById.get(gid) ?? "egal"}
                         label={resolveLabel(gid)}
                         teams={teams}
                         hoveredTeamId={hoveredTeamId}
@@ -309,7 +310,10 @@ export function DistributionFlowVisualization({
                       />
                     ))}
                   </div>
-                  <p className="mt-3 line-clamp-2 text-center text-[10px] leading-relaxed text-muted-foreground">
+                  <p className="mt-3 text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {meal.mealPreference}
+                  </p>
+                  <p className="mt-1 line-clamp-2 text-center text-[10px] leading-relaxed text-muted-foreground">
                     {meal.kitchenId}
                   </p>
                 </div>
@@ -344,6 +348,7 @@ function FlowTeamChip({
   nodeKey,
   teamId,
   role,
+  preference,
   label,
   teams,
   hoveredTeamId,
@@ -353,6 +358,7 @@ function FlowTeamChip({
   nodeKey: string;
   teamId: string;
   role: "kocht" | "Gast";
+  preference: string;
   label: string;
   teams: Team[];
   hoveredTeamId: string | null;
@@ -388,7 +394,7 @@ function FlowTeamChip({
       onMouseLeave={() => setHoveredTeamId(null)}
     >
       <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
-        {role}
+        {role} - {preference}
       </div>
       <div className="mt-1 line-clamp-3 font-medium leading-snug">{label}</div>
       {missing && (

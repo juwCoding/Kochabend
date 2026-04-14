@@ -65,23 +65,22 @@ export interface Team {
   // Abgeleitete Werte wie Küche/Präferenz werden dynamisch aus den Person-Daten berechnet.
 }
 
-// Gastgeber-Verhältnis: Welches Team isst bei welchem Team
-export interface GuestRelation {
-  guestTeamId: string; // Team, das zu Gast ist
-  hostTeamId: string;  // Team, bei dem gegessen wird
-  course: Course;      // Welcher Gang
-  /** Koch-Partner des Gastgeber-Teams zum Zeitpunkt der Verteilungserstellung (Anzeige wenn hostTeamId veraltet). */
-  hostMemberNamesSnapshot?: readonly [string, string];
-}
-
-// Verteilung: Welches Team kocht welchen Gang
+// Verteilung (flach, pro Koch-Team)
 export interface Distribution {
-  teamId: string;
-  course: Course; // Welchen Gang kocht das Team
-  kitchenId: string; // In welcher Küche
-  guestRelations: GuestRelation[]; // Bei welchen Teams isst dieses Team
-  /** Koch-Team zum Zeitpunkt der Verteilungserstellung (Anzeige wenn teamId veraltet). */
-  cookMemberNamesSnapshot?: readonly [string, string];
+  course: Course;
+  kitchenId: string;
+  cookTeamId: string;
+  /** Variable Anzahl Gast-Teams (z. B. 2 oder 3). */
+  guestTeamIds?: string[];
+  guestTeam1Id?: string;
+  guestTeam2Id?: string;
+  /**
+   * Team-Namen als "Name1,Name2" für Anzeige-Fallback, wenn Team-ID nicht mehr vorhanden ist.
+   */
+  cookTeamNamesSnapshot?: string;
+  guestTeamNamesSnapshots?: string[];
+  guestTeam1NamesSnapshot?: string;
+  guestTeam2NamesSnapshot?: string;
 }
 
 // Value Mapping für Küche, Ernährungsform, Gericht-Präferenz

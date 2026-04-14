@@ -43,13 +43,14 @@ export function Step5Invitations() {
     const team = state.teams.find(
       (t) => t.person1Id === previewPerson.id || t.person2Id === previewPerson.id
     );
-    const distribution = state.distribution.find((d) => d.teamId === team?.id);
+    const distribution = state.distribution.find((d) => d.cookTeamId === team?.id);
 
     return replacePlaceholders(
       template,
       previewPerson,
       team,
       distribution,
+      state.distribution,
       state.persons,
       state.teams,
       state.customFields,
