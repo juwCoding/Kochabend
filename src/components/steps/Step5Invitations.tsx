@@ -16,6 +16,12 @@ function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLText
   );
 }
 
+function sanitizeDownloadFilePart(value: string): string {
+  const collapsedWhitespace = value.trim().replace(/\s+/g, "_");
+  const safe = collapsedWhitespace.replace(/[^a-zA-Z0-9._-]/g, "");
+  return safe.length > 0 ? safe : "person";
+}
+
 export function Step5Invitations() {
   const { state, dispatch } = useAppState();
   const [template, setTemplate] = useState(state.invitationTemplate || "");
@@ -173,11 +179,12 @@ export function Step5Invitations() {
     if (!invitation) return;
 
     const person = state.persons.find((p) => p.id === personId);
+    const safeNamePart = sanitizeDownloadFilePart(person?.name || personId);
     const blob = new Blob([invitation], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `einladung_${person?.name || personId}.txt`;
+    a.download = `einladung_${safeNamePart}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

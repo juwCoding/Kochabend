@@ -7,6 +7,14 @@ import {
   formatKitchenLabel,
 } from "@/utils/valueResolution";
 
+function replaceTokenSafely(input: string, pattern: RegExp, value: string): string {
+  return input.replace(pattern, () => value);
+}
+
+function replaceLiteralSafely(input: string, token: string, value: string): string {
+  return input.split(token).join(value);
+}
+
 // Get all available placeholders from a person and their team/distribution data
 export function getAvailablePlaceholders(
   columnMapping: Record<string, string>,
@@ -84,11 +92,11 @@ export function replacePlaceholders(
   let result = template;
 
   // Basic person fields
-  result = result.replace(/\{\{Name\}\}/g, person.name);
-  result = result.replace(/\{\{Ernährungsform\}\}/g, formatFoodPreferenceLabel(person.preference ?? ""));
-  result = result.replace(/\{\{Präferenz\}\}/g, formatFoodPreferenceLabel(person.preference ?? "")); // Rückwärtskompatibilität
-  result = result.replace(/\{\{Unverträglichkeiten\}\}/g, person.intolerances || "");
-  result = result.replace(/\{\{Adresse\}\}/g, person.kitchenAddress);
+  result = replaceTokenSafely(result, /\{\{Name\}\}/g, person.name);
+  result = replaceTokenSafely(result, /\{\{Ernährungsform\}\}/g, formatFoodPreferenceLabel(person.preference ?? ""));
+  result = replaceTokenSafely(result, /\{\{Präferenz\}\}/g, formatFoodPreferenceLabel(person.preference ?? "")); // Rückwärtskompatibilität
+  result = replaceTokenSafely(result, /\{\{Unverträglichkeiten\}\}/g, person.intolerances || "");
+  result = replaceTokenSafely(result, /\{\{Adresse\}\}/g, person.kitchenAddress);
   // Partner: aus Team oder person.partner
   let partnerName = person.partner || "";
   if (!partnerName && team) {
@@ -96,10 +104,10 @@ export function replacePlaceholders(
     const partner = allPersons.find((p) => p.id === partnerId);
     partnerName = partner?.name || "";
   }
-  result = result.replace(/\{\{Gruppe\}\}/g, partnerName); // Rückwärtskompatibilität
-  result = result.replace(/\{\{Partner\}\}/g, partnerName);
-  result = result.replace(/\{\{Küche\}\}/g, formatKitchenLabel(person.kitchen ?? ""));
-  result = result.replace(/\{\{Gericht-Präferenz\}\}/g, formatCourseLabel(person.coursePreference || ""));
+  result = replaceTokenSafely(result, /\{\{Gruppe\}\}/g, partnerName); // Rückwärtskompatibilität
+  result = replaceTokenSafely(result, /\{\{Partner\}\}/g, partnerName);
+  result = replaceTokenSafely(result, /\{\{Küche\}\}/g, formatKitchenLabel(person.kitchen ?? ""));
+  result = replaceTokenSafely(result, /\{\{Gericht-Präferenz\}\}/g, formatCourseLabel(person.coursePreference || ""));
 
   // Team fields
   if (team) {
@@ -107,15 +115,15 @@ export function replacePlaceholders(
     const partner = allPersons.find((p) => p.id === partnerId);
     const teamPreference = getTeamPreference(team, allPersons);
     
-    result = result.replace(/\{\{TeamPartner\}\}/g, partner?.name || "");
-    result = result.replace(/\{\{TeamErnährungsform\}\}/g, formatFoodPreferenceLabel(teamPreference));
+    result = replaceTokenSafely(result, /\{\{TeamPartner\}\}/g, partner?.name || "");
+    result = replaceTokenSafely(result, /\{\{TeamErnährungsform\}\}/g, formatFoodPreferenceLabel(teamPreference));
     // Rückwärtskompatibilität
-    result = result.replace(/\{\{TeamPräferenz\}\}/g, formatFoodPreferenceLabel(teamPreference));
+    result = replaceTokenSafely(result, /\{\{TeamPräferenz\}\}/g, formatFoodPreferenceLabel(teamPreference));
   } else {
-    result = result.replace(/\{\{TeamPartner\}\}/g, "");
-    result = result.replace(/\{\{TeamErnährungsform\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{TeamPartner\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{TeamErnährungsform\}\}/g, "");
     // Rückwärtskompatibilität
-    result = result.replace(/\{\{TeamPräferenz\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{TeamPräferenz\}\}/g, "");
   }
 
   // Distribution fields
@@ -125,9 +133,9 @@ export function replacePlaceholders(
       ? formatFoodPreferenceLabel(getTeamPreference(cookingTeam, allPersons))
       : "";
 
-    result = result.replace(/\{\{KochtGang\}\}/g, distribution.course);
-    result = result.replace(/\{\{KochtAdresse\}\}/g, distribution.kitchenId);
-    result = result.replace(/\{\{KochtErnährungsform\}\}/g, cookingTeamPreference);
+    result = replaceTokenSafely(result, /\{\{KochtGang\}\}/g, distribution.course);
+    result = replaceTokenSafely(result, /\{\{KochtAdresse\}\}/g, distribution.kitchenId);
+    result = replaceTokenSafely(result, /\{\{KochtErnährungsform\}\}/g, cookingTeamPreference);
     const cookingGuestTeamIds = getDistributionGuestTeamIds(distribution);
     const cookingGuestTeams = cookingGuestTeamIds
       .map((teamId) => allTeams.find((t) => t.id === teamId))
@@ -136,7 +144,7 @@ export function replacePlaceholders(
       .map((guestTeam) => getTeamDisplayName(guestTeam, allPersons))
       .filter((name) => name.trim().length > 0)
       .join(", ");
-    result = result.replace(/\{\{KochtGäste\}\}/g, kochtGaeste);
+    result = replaceTokenSafely(result, /\{\{KochtGäste\}\}/g, kochtGaeste);
 
     const guestPersons = cookingGuestTeams.flatMap((guestTeam) => {
       const guestPerson1 = allPersons.find((p) => p.id === guestTeam.person1Id);
@@ -147,12 +155,13 @@ export function replacePlaceholders(
       .map((guest) => ({ name: guest.name, intolerance: guest.intolerances?.trim() || "" }))
       .filter((entry) => entry.intolerance.length > 0)
       .map((entry) => `${entry.intolerance} (${entry.name})`);
-    result = result.replace(
+    result = replaceTokenSafely(
+      result,
       /\{\{KochtUnverträglichkeiten\}\}/g,
       intoleranceEntries.length > 0 ? intoleranceEntries.join(", ") : "Keine Unverträglichkeiten"
     );
     // Rückwärtskompatibilität
-    result = result.replace(/\{\{KochtKüche\}\}/g, distribution.kitchenId);
+    result = replaceTokenSafely(result, /\{\{KochtKüche\}\}/g, distribution.kitchenId);
 
     const courseOrder: Record<Distribution["course"], number> = {
       Vorspeise: 0,
@@ -190,19 +199,19 @@ export function replacePlaceholders(
       const hostTeamPreference1 = hostTeam1
         ? formatFoodPreferenceLabel(getTeamPreference(hostTeam1, allPersons))
         : "";
-      result = result.replace(/\{\{IsstBei1Team\}\}/g, hostNames1);
-      result = result.replace(/\{\{IsstBei1Gang\}\}/g, host1.course);
-      result = result.replace(/\{\{IsstBei1Adresse\}\}/g, host1.kitchenId);
-      result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, hostTeamPreference1);
+      result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, hostNames1);
+      result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, host1.course);
+      result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, host1.kitchenId);
+      result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, hostTeamPreference1);
       // Rückwärtskompatibilität
-      result = result.replace(/\{\{IsstBei1\}\}/g, hostNames1);
+      result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, hostNames1);
     } else {
-      result = result.replace(/\{\{IsstBei1Team\}\}/g, "");
-      result = result.replace(/\{\{IsstBei1Gang\}\}/g, "");
-      result = result.replace(/\{\{IsstBei1Adresse\}\}/g, "");
-      result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, "");
       // Rückwärtskompatibilität
-      result = result.replace(/\{\{IsstBei1\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, "");
     }
 
     const host2 = hostVisits[1];
@@ -225,38 +234,38 @@ export function replacePlaceholders(
       const hostTeamPreference2 = hostTeam2
         ? formatFoodPreferenceLabel(getTeamPreference(hostTeam2, allPersons))
         : "";
-      result = result.replace(/\{\{IsstBei2Team\}\}/g, hostNames2);
-      result = result.replace(/\{\{IsstBei2Gang\}\}/g, host2.course);
-      result = result.replace(/\{\{IsstBei2Adresse\}\}/g, host2.kitchenId);
-      result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, hostTeamPreference2);
+      result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, hostNames2);
+      result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, host2.course);
+      result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, host2.kitchenId);
+      result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, hostTeamPreference2);
       // Rückwärtskompatibilität
-      result = result.replace(/\{\{IsstBei2\}\}/g, hostNames2);
+      result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, hostNames2);
     } else {
-      result = result.replace(/\{\{IsstBei2Team\}\}/g, "");
-      result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
-      result = result.replace(/\{\{IsstBei2Adresse\}\}/g, "");
-      result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, "");
       // Rückwärtskompatibilität
-      result = result.replace(/\{\{IsstBei2\}\}/g, "");
+      result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, "");
     }
   } else {
-    result = result.replace(/\{\{KochtGang\}\}/g, "");
-    result = result.replace(/\{\{KochtAdresse\}\}/g, "");
-    result = result.replace(/\{\{KochtErnährungsform\}\}/g, "");
-    result = result.replace(/\{\{KochtUnverträglichkeiten\}\}/g, "Keine Unverträglichkeiten");
-    result = result.replace(/\{\{KochtGäste\}\}/g, "");
-    result = result.replace(/\{\{IsstBei1Team\}\}/g, "");
-    result = result.replace(/\{\{KochtKüche\}\}/g, "");
-    result = result.replace(/\{\{IsstBei1Gang\}\}/g, "");
-    result = result.replace(/\{\{IsstBei1Adresse\}\}/g, "");
-    result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2Team\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2Adresse\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{KochtGang\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{KochtAdresse\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{KochtErnährungsform\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{KochtUnverträglichkeiten\}\}/g, "Keine Unverträglichkeiten");
+    result = replaceTokenSafely(result, /\{\{KochtGäste\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{KochtKüche\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, "");
     // Rückwärtskompatibilität
-    result = result.replace(/\{\{IsstBei1\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, "");
+    result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, "");
   }
 
   const mappedFields = new Set(Object.values(columnMapping));
@@ -265,7 +274,7 @@ export function replacePlaceholders(
     const fieldName = customFields[fieldId]?.trim();
     if (!fieldName) continue;
     const value = person.customFieldValues?.[fieldId] ?? "";
-    result = result.replaceAll(`{{${fieldName}}}`, value);
+    result = replaceLiteralSafely(result, `{{${fieldName}}}`, value);
   }
 
   return result;
