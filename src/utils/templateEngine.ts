@@ -1,6 +1,6 @@
 import type { Person, Team, Distribution } from "@/types/models";
 import { formatCookSnapshotUnd } from "@/utils/distributionDisplay";
-import { getTeamKitchenOptions, getTeamPreference } from "@/utils/teamDerived";
+import { getTeamPreference } from "@/utils/teamDerived";
 import {
   formatCourseLabel,
   formatFoodPreferenceLabel,
@@ -22,7 +22,6 @@ export function getAvailablePlaceholders(
   addIfMapped("preference", "Ernährungsform");
   addIfMapped("intolerances", "Unverträglichkeiten");
   addIfMapped("kitchenAddress", "Adresse");
-  addIfMapped("partner", "Gruppe"); // Rückwärtskompatibilität
   addIfMapped("partner", "Partner");
   addIfMapped("kitchen", "Küche");
   addIfMapped("coursePreference", "Gericht-Präferenz");
@@ -30,14 +29,20 @@ export function getAvailablePlaceholders(
   // Team-/Verteilungsfelder bleiben verfügbar.
   placeholders.push(
     "TeamPartner",
-    "TeamKüche",
-    "TeamPräferenz",
+    "TeamErnährungsform",
     "KochtGang",
-    "KochtKüche",
-    "IsstBei1",
+    "KochtAdresse",
+    "KochtErnährungsform",
+    "KochtUnverträglichkeiten",
+    "KochtGäste",
+    "IsstBei1Team",
     "IsstBei1Gang",
-    "IsstBei2",
-    "IsstBei2Gang"
+    "IsstBei1Adresse",
+    "IsstBei1Ernährungsform",
+    "IsstBei2Team",
+    "IsstBei2Gang",
+    "IsstBei2Adresse",
+    "IsstBei2Ernährungsform"
   );
 
   for (const fieldId of mappedFields) {
@@ -47,6 +52,21 @@ export function getAvailablePlaceholders(
   }
 
   return placeholders;
+}
+
+function getDistributionGuestTeamIds(distribution: Distribution): string[] {
+  if (Array.isArray(distribution.guestTeamIds)) return distribution.guestTeamIds;
+  return [distribution.guestTeam1Id, distribution.guestTeam2Id].filter(
+    (id): id is string => typeof id === "string" && id.length > 0
+  );
+}
+
+function getTeamDisplayName(team: Team | undefined, allPersons: Person[]): string {
+  if (!team) return "";
+  const p1 = allPersons.find((p) => p.id === team.person1Id);
+  const p2 = allPersons.find((p) => p.id === team.person2Id);
+  if (p1?.name && p2?.name) return `${p1.name} und ${p2.name}`;
+  return p1?.name || p2?.name || "";
 }
 
 // Replace placeholders in template
@@ -85,21 +105,53 @@ export function replacePlaceholders(
   if (team) {
     const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
     const partner = allPersons.find((p) => p.id === partnerId);
-    const teamKitchenLabel = getTeamKitchenOptions(team, allPersons).join(" / ");
     const teamPreference = getTeamPreference(team, allPersons);
     
     result = result.replace(/\{\{TeamPartner\}\}/g, partner?.name || "");
-    result = result.replace(/\{\{TeamKüche\}\}/g, teamKitchenLabel);
+    result = result.replace(/\{\{TeamErnährungsform\}\}/g, formatFoodPreferenceLabel(teamPreference));
+    // Rückwärtskompatibilität
     result = result.replace(/\{\{TeamPräferenz\}\}/g, formatFoodPreferenceLabel(teamPreference));
   } else {
     result = result.replace(/\{\{TeamPartner\}\}/g, "");
-    result = result.replace(/\{\{TeamKüche\}\}/g, "");
+    result = result.replace(/\{\{TeamErnährungsform\}\}/g, "");
+    // Rückwärtskompatibilität
     result = result.replace(/\{\{TeamPräferenz\}\}/g, "");
   }
 
   // Distribution fields
   if (distribution) {
+    const cookingTeam = allTeams.find((t) => t.id === distribution.cookTeamId);
+    const cookingTeamPreference = cookingTeam
+      ? formatFoodPreferenceLabel(getTeamPreference(cookingTeam, allPersons))
+      : "";
+
     result = result.replace(/\{\{KochtGang\}\}/g, distribution.course);
+    result = result.replace(/\{\{KochtAdresse\}\}/g, distribution.kitchenId);
+    result = result.replace(/\{\{KochtErnährungsform\}\}/g, cookingTeamPreference);
+    const cookingGuestTeamIds = getDistributionGuestTeamIds(distribution);
+    const cookingGuestTeams = cookingGuestTeamIds
+      .map((teamId) => allTeams.find((t) => t.id === teamId))
+      .filter((entry): entry is Team => Boolean(entry));
+    const kochtGaeste = cookingGuestTeams
+      .map((guestTeam) => getTeamDisplayName(guestTeam, allPersons))
+      .filter((name) => name.trim().length > 0)
+      .join(", ");
+    result = result.replace(/\{\{KochtGäste\}\}/g, kochtGaeste);
+
+    const guestPersons = cookingGuestTeams.flatMap((guestTeam) => {
+      const guestPerson1 = allPersons.find((p) => p.id === guestTeam.person1Id);
+      const guestPerson2 = allPersons.find((p) => p.id === guestTeam.person2Id);
+      return [guestPerson1, guestPerson2].filter((entry): entry is Person => Boolean(entry));
+    });
+    const intoleranceEntries = guestPersons
+      .map((guest) => ({ name: guest.name, intolerance: guest.intolerances?.trim() || "" }))
+      .filter((entry) => entry.intolerance.length > 0)
+      .map((entry) => `${entry.intolerance} (${entry.name})`);
+    result = result.replace(
+      /\{\{KochtUnverträglichkeiten\}\}/g,
+      intoleranceEntries.length > 0 ? intoleranceEntries.join(", ") : "Keine Unverträglichkeiten"
+    );
+    // Rückwärtskompatibilität
     result = result.replace(/\{\{KochtKüche\}\}/g, distribution.kitchenId);
 
     const courseOrder: Record<Distribution["course"], number> = {
@@ -135,11 +187,22 @@ export function replacePlaceholders(
         const fromSnap = formatCookSnapshotUnd(host1);
         if (fromSnap) hostNames1 = fromSnap;
       }
-      result = result.replace(/\{\{IsstBei1\}\}/g, hostNames1);
+      const hostTeamPreference1 = hostTeam1
+        ? formatFoodPreferenceLabel(getTeamPreference(hostTeam1, allPersons))
+        : "";
+      result = result.replace(/\{\{IsstBei1Team\}\}/g, hostNames1);
       result = result.replace(/\{\{IsstBei1Gang\}\}/g, host1.course);
+      result = result.replace(/\{\{IsstBei1Adresse\}\}/g, host1.kitchenId);
+      result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, hostTeamPreference1);
+      // Rückwärtskompatibilität
+      result = result.replace(/\{\{IsstBei1\}\}/g, hostNames1);
     } else {
-      result = result.replace(/\{\{IsstBei1\}\}/g, "");
+      result = result.replace(/\{\{IsstBei1Team\}\}/g, "");
       result = result.replace(/\{\{IsstBei1Gang\}\}/g, "");
+      result = result.replace(/\{\{IsstBei1Adresse\}\}/g, "");
+      result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, "");
+      // Rückwärtskompatibilität
+      result = result.replace(/\{\{IsstBei1\}\}/g, "");
     }
 
     const host2 = hostVisits[1];
@@ -159,19 +222,41 @@ export function replacePlaceholders(
         const fromSnap = formatCookSnapshotUnd(host2);
         if (fromSnap) hostNames2 = fromSnap;
       }
-      result = result.replace(/\{\{IsstBei2\}\}/g, hostNames2);
+      const hostTeamPreference2 = hostTeam2
+        ? formatFoodPreferenceLabel(getTeamPreference(hostTeam2, allPersons))
+        : "";
+      result = result.replace(/\{\{IsstBei2Team\}\}/g, hostNames2);
       result = result.replace(/\{\{IsstBei2Gang\}\}/g, host2.course);
+      result = result.replace(/\{\{IsstBei2Adresse\}\}/g, host2.kitchenId);
+      result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, hostTeamPreference2);
+      // Rückwärtskompatibilität
+      result = result.replace(/\{\{IsstBei2\}\}/g, hostNames2);
     } else {
-      result = result.replace(/\{\{IsstBei2\}\}/g, "");
+      result = result.replace(/\{\{IsstBei2Team\}\}/g, "");
       result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
+      result = result.replace(/\{\{IsstBei2Adresse\}\}/g, "");
+      result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, "");
+      // Rückwärtskompatibilität
+      result = result.replace(/\{\{IsstBei2\}\}/g, "");
     }
   } else {
     result = result.replace(/\{\{KochtGang\}\}/g, "");
+    result = result.replace(/\{\{KochtAdresse\}\}/g, "");
+    result = result.replace(/\{\{KochtErnährungsform\}\}/g, "");
+    result = result.replace(/\{\{KochtUnverträglichkeiten\}\}/g, "Keine Unverträglichkeiten");
+    result = result.replace(/\{\{KochtGäste\}\}/g, "");
+    result = result.replace(/\{\{IsstBei1Team\}\}/g, "");
     result = result.replace(/\{\{KochtKüche\}\}/g, "");
-    result = result.replace(/\{\{IsstBei1\}\}/g, "");
     result = result.replace(/\{\{IsstBei1Gang\}\}/g, "");
-    result = result.replace(/\{\{IsstBei2\}\}/g, "");
+    result = result.replace(/\{\{IsstBei1Adresse\}\}/g, "");
+    result = result.replace(/\{\{IsstBei1Ernährungsform\}\}/g, "");
+    result = result.replace(/\{\{IsstBei2Team\}\}/g, "");
     result = result.replace(/\{\{IsstBei2Gang\}\}/g, "");
+    result = result.replace(/\{\{IsstBei2Adresse\}\}/g, "");
+    result = result.replace(/\{\{IsstBei2Ernährungsform\}\}/g, "");
+    // Rückwärtskompatibilität
+    result = result.replace(/\{\{IsstBei1\}\}/g, "");
+    result = result.replace(/\{\{IsstBei2\}\}/g, "");
   }
 
   const mappedFields = new Set(Object.values(columnMapping));
@@ -202,6 +287,7 @@ export function generateAllInvitations(
       (t) => t.person1Id === person.id || t.person2Id === person.id
     );
     const distribution = distributions.find((d) => d.cookTeamId === team?.id);
+    if (!distribution) continue;
 
     invitations[person.id] = replacePlaceholders(
       template,

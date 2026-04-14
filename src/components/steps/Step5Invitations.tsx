@@ -26,6 +26,62 @@ export function Step5Invitations() {
     state.columnMapping,
     state.customFields
   );
+  const customPlaceholderNames = useMemo(
+    () =>
+      Object.values(state.columnMapping)
+        .filter((fieldId) => fieldId.startsWith("custom_"))
+        .map((fieldId) => state.customFields[fieldId]?.trim())
+        .filter((name): name is string => Boolean(name)),
+    [state.columnMapping, state.customFields]
+  );
+  const customPlaceholderSet = useMemo(() => new Set(customPlaceholderNames), [customPlaceholderNames]);
+  const predefinedFieldPlaceholders = useMemo(() => {
+    const mappedFields = new Set(Object.values(state.columnMapping));
+    const entries: Array<[string, string]> = [
+      ["name", "Name"],
+      ["preference", "Ernährungsform"],
+      ["intolerances", "Unverträglichkeiten"],
+      ["partner", "Partner"],
+      ["kitchen", "Küche"],
+      ["kitchenAddress", "Adresse"],
+      ["coursePreference", "Gericht-Präferenz"],
+    ];
+    return entries
+      .filter(([fieldId]) => mappedFields.has(fieldId))
+      .map(([, placeholder]) => placeholder);
+  }, [state.columnMapping]);
+  const teamPlaceholders = ["TeamPartner", "TeamErnährungsform"];
+  const distributionPlaceholders = [
+    "KochtGang",
+    "KochtAdresse",
+    "KochtErnährungsform",
+    "KochtUnverträglichkeiten",
+    "KochtGäste",
+    "IsstBei1Team",
+    "IsstBei1Gang",
+    "IsstBei1Adresse",
+    "IsstBei1Ernährungsform",
+    "IsstBei2Team",
+    "IsstBei2Gang",
+    "IsstBei2Adresse",
+    "IsstBei2Ernährungsform",
+  ];
+  const predefinedPlaceholders = useMemo(
+    () => predefinedFieldPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
+    [predefinedFieldPlaceholders, availablePlaceholders]
+  );
+  const freePlaceholders = useMemo(
+    () => availablePlaceholders.filter((placeholder) => customPlaceholderSet.has(placeholder)),
+    [availablePlaceholders, customPlaceholderSet]
+  );
+  const groupedTeamPlaceholders = useMemo(
+    () => teamPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
+    [availablePlaceholders]
+  );
+  const groupedDistributionPlaceholders = useMemo(
+    () => distributionPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
+    [availablePlaceholders]
+  );
 
   const previewPerson = useMemo(() => {
     if (!previewPersonId) return null;
@@ -36,6 +92,17 @@ export function Step5Invitations() {
     () => [...state.persons].sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" })),
     [state.persons]
   );
+  const personsWithoutDistribution = useMemo(() => {
+    return [...state.persons]
+      .filter((person) => {
+        const team = state.teams.find(
+          (entry) => entry.person1Id === person.id || entry.person2Id === person.id
+        );
+        if (!team) return true;
+        return !state.distribution.some((entry) => entry.cookTeamId === team.id);
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" }));
+  }, [state.persons, state.teams, state.distribution]);
 
   const previewText = useMemo(() => {
     if (!previewPerson) return "";
@@ -170,18 +237,76 @@ export function Step5Invitations() {
 
           <div>
             <h3 className="text-lg font-semibold mb-2">Verfügbare Platzhalter</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {availablePlaceholders.map((placeholder) => (
-                <Button
-                  key={placeholder}
-                  variant="outline"
-                  size="sm"
-                  onClick={() => insertPlaceholder(placeholder)}
-                  className="justify-start"
-                >
-                  {`{{${placeholder}}}`}
-                </Button>
-              ))}
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">vordefinierte Felder</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {predefinedPlaceholders.map((placeholder) => (
+                    <Button
+                      key={placeholder}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => insertPlaceholder(placeholder)}
+                      className="justify-start"
+                    >
+                      {`{{${placeholder}}}`}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              {freePlaceholders.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Freifelder</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {freePlaceholders.map((placeholder) => (
+                      <Button
+                        key={placeholder}
+                        variant="outline"
+                        size="sm"
+                        onClick={() => insertPlaceholder(placeholder)}
+                        className="justify-start"
+                      >
+                        {`{{${placeholder}}}`}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Team</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {groupedTeamPlaceholders.map((placeholder) => (
+                    <Button
+                      key={placeholder}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => insertPlaceholder(placeholder)}
+                      className="justify-start"
+                    >
+                      {`{{${placeholder}}}`}
+                    </Button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Verteilung</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {groupedDistributionPlaceholders.map((placeholder) => (
+                    <Button
+                      key={placeholder}
+                      variant="outline"
+                      size="sm"
+                      onClick={() => insertPlaceholder(placeholder)}
+                      className="justify-start"
+                    >
+                      {`{{${placeholder}}}`}
+                    </Button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
 
@@ -261,6 +386,17 @@ export function Step5Invitations() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {personsWithoutDistribution.length > 0 && (
+            <div className="rounded-md border border-amber-300/80 dark:border-amber-700/80 bg-amber-100 dark:bg-amber-950/40 px-3 py-2.5 text-sm">
+              <div className="font-medium text-amber-950 dark:text-amber-100">
+                Keine Einladung generiert (nicht in Verteilung)
+              </div>
+              <div className="mt-1 text-amber-900/90 dark:text-amber-200/95">
+                {personsWithoutDistribution.map((person) => person.name).join(", ")}
+              </div>
             </div>
           )}
         </div>
