@@ -35,6 +35,27 @@ interface AppStateWithHistory {
 }
 
 const STORAGE_KEY = "kochabend_state";
+const STATE_FORMAT_VERSION = 1;
+const DATA_PLACEHOLDER = "__KOCHABEND_DATA_PLACEHOLDER__";
+
+interface VersionedStateEnvelope<T> {
+  version: number;
+  hash: string;
+  data: T;
+}
+
+export class StateIntegrityError extends Error {
+  constructor(message = "State integrity check failed") {
+    super(message);
+    this.name = "StateIntegrityError";
+  }
+}
+
+interface ParsedImportStateResult<T> {
+  state: T;
+  hasEnvelope: boolean;
+  integrityValid: boolean;
+}
 
 type PersistenceMode =
   | "full-history"
@@ -69,6 +90,167 @@ function trimHistoryToCurrent(
   return {
     history,
     historyIndex: history.length - 1,
+  };
+}
+
+function toJsonCompatible<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function computeIntegrityHash(input: string): string {
+  let hash = 0x811c9dc5;
+
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+function serializeStateEnvelope<T>(data: T, pretty = false): string {
+  const version = STATE_FORMAT_VERSION;
+  const dataJson = JSON.stringify(toJsonCompatible(data), null, pretty ? 2 : 0);
+  const hash = computeIntegrityHash(`${dataJson};version=${version}`);
+  const template = JSON.stringify(
+    { version, hash, data: DATA_PLACEHOLDER },
+    null,
+    pretty ? 2 : 0
+  );
+  return template.replace(`"${DATA_PLACEHOLDER}"`, dataJson);
+}
+
+function parseJsonStringLiteral(source: string, start: number): number {
+  if (source[start] !== "\"") return -1;
+  let i = start + 1;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "\\") {
+      i += 2;
+      continue;
+    }
+    if (ch === "\"") return i + 1;
+    i += 1;
+  }
+  return -1;
+}
+
+function findJsonValueEnd(source: string, start: number): number {
+  if (start >= source.length) return -1;
+  const startChar = source[start];
+
+  if (startChar === "\"") return parseJsonStringLiteral(source, start);
+
+  if (startChar === "{" || startChar === "[") {
+    const closeChar = startChar === "{" ? "}" : "]";
+    let depth = 0;
+    let i = start;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === "\"") {
+        const end = parseJsonStringLiteral(source, i);
+        if (end === -1) return -1;
+        i = end;
+        continue;
+      }
+      if (ch === startChar) depth += 1;
+      if (ch === closeChar) {
+        depth -= 1;
+        if (depth === 0) return i + 1;
+      }
+      i += 1;
+    }
+    return -1;
+  }
+
+  let i = start;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === "," || ch === "}" || ch === "]") return i;
+    i += 1;
+  }
+  return source.length;
+}
+
+function extractTopLevelDataRaw(source: string): string | null {
+  let i = 0;
+  while (i < source.length && /\s/.test(source[i])) i += 1;
+  if (source[i] !== "{") return null;
+  i += 1;
+
+  while (i < source.length) {
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    if (source[i] === "}") break;
+    if (source[i] !== "\"") return null;
+
+    const keyEnd = parseJsonStringLiteral(source, i);
+    if (keyEnd === -1) return null;
+    const key = JSON.parse(source.slice(i, keyEnd)) as string;
+    i = keyEnd;
+
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    if (source[i] !== ":") return null;
+    i += 1;
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+
+    const valueStart = i;
+    const valueEnd = findJsonValueEnd(source, valueStart);
+    if (valueEnd === -1) return null;
+
+    if (key === "data") {
+      return source.slice(valueStart, valueEnd);
+    }
+
+    i = valueEnd;
+    while (i < source.length && /\s/.test(source[i])) i += 1;
+    if (source[i] === ",") i += 1;
+  }
+
+  return null;
+}
+
+export function inspectImportState(json: string): { hasEnvelope: boolean; integrityValid: boolean } {
+  const parsed = JSON.parse(json) as unknown;
+  if (!parsed || typeof parsed !== "object" || !("data" in parsed)) {
+    return { hasEnvelope: false, integrityValid: true };
+  }
+
+  const envelope = parsed as Partial<VersionedStateEnvelope<unknown>>;
+  if (typeof envelope.hash !== "string" || typeof envelope.version !== "number") {
+    return { hasEnvelope: true, integrityValid: false };
+  }
+
+  const rawData = extractTopLevelDataRaw(json);
+  if (rawData === null) {
+    return { hasEnvelope: true, integrityValid: false };
+  }
+
+  const expectedHash = computeIntegrityHash(`${rawData};version=${envelope.version}`);
+  return { hasEnvelope: true, integrityValid: expectedHash === envelope.hash };
+}
+
+function parseImportState<T>(
+  json: string,
+  options?: { allowCorrupt?: boolean }
+): ParsedImportStateResult<T> {
+  const parsed = JSON.parse(json) as unknown;
+  const inspection = inspectImportState(json);
+  if (inspection.hasEnvelope) {
+    if (!inspection.integrityValid && !options?.allowCorrupt) {
+      throw new StateIntegrityError();
+    }
+    const envelope = parsed as VersionedStateEnvelope<T>;
+    return {
+      state: envelope.data,
+      hasEnvelope: true,
+      integrityValid: inspection.integrityValid,
+    };
+  }
+
+  return {
+    state: parsed as T,
+    hasEnvelope: false,
+    integrityValid: true,
   };
 }
 
@@ -122,7 +304,7 @@ function saveStateToStorage(state: AppStateWithHistory): PersistenceMode {
 
   for (const attempt of attempts) {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(attempt.payload));
+      localStorage.setItem(STORAGE_KEY, serializeStateEnvelope(attempt.payload));
       return attempt.mode;
     } catch (error) {
       if (!isQuotaExceededError(error)) {
@@ -170,15 +352,25 @@ const loadStateFromStorage = (): AppStateWithHistory | null => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      const parsed = JSON.parse(stored);
-      const base = parsed.current || getDefaultAppState();
+      const parsedResult = parseImportState<AppStateWithHistory>(stored);
+      if (parsedResult.hasEnvelope && !parsedResult.integrityValid) {
+        console.error("Failed to load state from localStorage: integrity hash mismatch.");
+        return null;
+      }
+      const loaded = parsedResult.state;
+      if (!loaded || typeof loaded !== "object") {
+        return null;
+      }
+
+      const maybeLoaded = loaded as Partial<AppStateWithHistory>;
+      const base = maybeLoaded.current || getDefaultAppState();
       const current = hydrateAppStateShape(base);
-      const historyRaw = parsed.history || [current];
+      const historyRaw = maybeLoaded.history || [current];
       const history = historyRaw.map((h: AppState) => hydrateAppStateShape(h));
       return {
         current,
         history,
-        historyIndex: parsed.historyIndex ?? 0,
+        historyIndex: maybeLoaded.historyIndex ?? 0,
         maxHistorySize: 50,
       };
     }
@@ -374,7 +566,7 @@ interface AppStateContextType {
   canRedo: boolean;
   saveToHistory: () => void;
   exportState: () => string;
-  importState: (json: string) => void;
+  importState: (json: string, options?: { allowCorrupt?: boolean }) => void;
 }
 
 const AppStateContext = createContext<AppStateContextType | undefined>(undefined);
@@ -424,12 +616,18 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const exportState = useCallback(() => {
-    return JSON.stringify(stateWithHistory.current, null, 2);
+    return serializeStateEnvelope(stateWithHistory.current, true);
   }, [stateWithHistory.current]);
 
-  const importState = useCallback((json: string) => {
+  const importState = useCallback((json: string, options?: { allowCorrupt?: boolean }) => {
     try {
-      const importedState: AppState = JSON.parse(json);
+      const parsedResult = parseImportState<AppState>(json, options);
+      const importedState = parsedResult.state;
+
+      if (!importedState || typeof importedState !== "object") {
+        throw new Error("Invalid state payload");
+      }
+
       dispatch({
         type: "LOAD_STATE",
         payload: hydrateAppStateShape({
@@ -440,6 +638,9 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       });
     } catch (error) {
       console.error("Failed to import state:", error);
+      if (error instanceof StateIntegrityError) {
+        throw error;
+      }
       throw new Error("Invalid state file");
     }
   }, []);

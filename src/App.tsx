@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppStateProvider, useAppState } from "@/context/AppStateContext";
+import { AppStateProvider, inspectImportState, useAppState } from "@/context/AppStateContext";
 import { Wizard } from "@/components/Wizard";
 import { Button } from "@/components/ui/button";
 import { Step1CSVImport } from "@/components/steps/Step1CSVImport";
@@ -62,13 +62,24 @@ function AppContent() {
     setIsImporting(true);
     const reader = new FileReader();
     reader.onload = (e) => {
+      const json = (e.target?.result as string) || "";
       try {
-        const json = e.target?.result as string;
-        importState(json);
-        setIsImporting(false);
+        const inspection = inspectImportState(json);
+        const shouldImport = inspection.integrityValid
+          ? window.confirm(
+              "Der Import überschreibt deinen aktuellen Stand vollständig. Möchtest du fortfahren?"
+            )
+          : window.confirm(
+              "Integritätsprüfung fehlgeschlagen (Hash stimmt nicht). Die Datei könnte beschädigt sein. Der Import überschreibt deinen aktuellen Stand vollständig. Trotzdem importieren?"
+            );
+
+        if (shouldImport) {
+          importState(json, { allowCorrupt: !inspection.integrityValid });
+        }
       } catch (error) {
         console.error("Failed to import:", error);
         alert("Fehler beim Importieren der Datei");
+      } finally {
         setIsImporting(false);
       }
     };
