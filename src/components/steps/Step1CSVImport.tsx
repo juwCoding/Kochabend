@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,6 +17,11 @@ export function Step1CSVImport() {
   const [error, setError] = useState<string | null>(null);
   const [newCustomFieldName, setNewCustomFieldName] = useState("");
   const [isCustomFieldDialogOpen, setIsCustomFieldDialogOpen] = useState(false);
+  const [newColumnName, setNewColumnName] = useState("");
+  const [newColumnDefaultValue, setNewColumnDefaultValue] = useState("");
+  const [isAddColumnDialogOpen, setIsAddColumnDialogOpen] = useState(false);
+  const [isAddingRow, setIsAddingRow] = useState(false);
+  const [newRowValues, setNewRowValues] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Use state data if available, otherwise use local state
@@ -151,9 +156,59 @@ export function Step1CSVImport() {
     });
   };
 
+  const applyCsvRawData = (nextRawData: string[][]) => {
+    const nextCsvData = hasHeader && nextRawData.length > 0 ? nextRawData.slice(1) : nextRawData;
+    dispatch({
+      type: "SET_CSV_DATA",
+      payload: {
+        csvData: nextCsvData,
+        csvRawData: nextRawData,
+        hasHeader,
+      },
+    });
+  };
+
+  const handleAddColumn = () => {
+    const columnName = newColumnName.trim();
+    if (!columnName || previewData.length === 0) return;
+
+    const defaultValue = newColumnDefaultValue;
+    const nextRawData = previewData.map((row, rowIndex) => {
+      if (hasHeader && rowIndex === 0) {
+        return [...row, columnName];
+      }
+      return [...row, defaultValue];
+    });
+
+    applyCsvRawData(nextRawData);
+    setNewColumnName("");
+    setNewColumnDefaultValue("");
+    setIsAddColumnDialogOpen(false);
+  };
+
+  const handleAddRow = () => {
+    if (previewData.length === 0) return;
+    const columnCountForNewRow = previewData[0]?.length ?? 0;
+    if (columnCountForNewRow <= 0) return;
+
+    const newRow = Array.from({ length: columnCountForNewRow }, (_, index) => newRowValues[index] ?? "");
+    const nextRawData = [...previewData, newRow];
+    applyCsvRawData(nextRawData);
+    setNewRowValues(Array.from({ length: columnCountForNewRow }, () => ""));
+    setIsAddingRow(false);
+  };
+
   const displayData = hasHeader && previewData.length > 0 ? previewData.slice(1) : previewData;
   const headerRow = hasHeader && previewData.length > 0 ? previewData[0] : null;
   const columnCount = previewData.length > 0 ? previewData[0].length : 0;
+
+  useEffect(() => {
+    if (!isAddingRow) return;
+    setNewRowValues((prev) => {
+      const next = Array.from({ length: columnCount }, (_, index) => prev[index] ?? "");
+      return next;
+    });
+  }, [columnCount, isAddingRow]);
 
   // Check if all required fields are mapped
   const requiredFieldsMapped = useMemo(() => {
@@ -251,39 +306,76 @@ export function Step1CSVImport() {
                   </div>
                 </details>
               </div>
-              <Dialog open={isCustomFieldDialogOpen} onOpenChange={setIsCustomFieldDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm">
-                    <Plus className="mr-2 h-4 w-4" />
-                    Freifeld hinzufügen
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Neues Freifeld erstellen</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="text-sm font-medium">Feldname</label>
-                      <Input
-                        value={newCustomFieldName}
-                        onChange={(e) => setNewCustomFieldName(e.target.value)}
-                        placeholder="z.B. Notizen"
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            handleAddCustomField();
-                          }
-                        }}
-                      />
+              <div className="flex items-center gap-2">
+                <Dialog open={isCustomFieldDialogOpen} onOpenChange={setIsCustomFieldDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Freifeld hinzufügen
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Neues Freifeld erstellen</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium">Feldname</label>
+                        <Input
+                          value={newCustomFieldName}
+                          onChange={(e) => setNewCustomFieldName(e.target.value)}
+                          placeholder="z.B. Notizen"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleAddCustomField();
+                            }
+                          }}
+                        />
+                      </div>
+                      <DialogFooter>
+                        <Button onClick={handleAddCustomField} disabled={!newCustomFieldName.trim()}>
+                          Erstellen
+                        </Button>
+                      </DialogFooter>
                     </div>
-                    <DialogFooter>
-                      <Button onClick={handleAddCustomField} disabled={!newCustomFieldName.trim()}>
-                        Erstellen
+                  </DialogContent>
+                </Dialog>
+
+                <Dialog open={isAddColumnDialogOpen} onOpenChange={setIsAddColumnDialogOpen}>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm">
+                      <Plus className="mr-2 h-4 w-4" />
+                      Spalte hinzufügen
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle>Neue Spalte hinzufügen</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium">Spaltenname</label>
+                        <Input
+                          value={newColumnName}
+                          onChange={(e) => setNewColumnName(e.target.value)}
+                          placeholder="z.B. Notizen"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-sm font-medium">Default-Wert (optional)</label>
+                        <Input
+                          value={newColumnDefaultValue}
+                          onChange={(e) => setNewColumnDefaultValue(e.target.value)}
+                          placeholder="Wert für bestehende Zeilen"
+                        />
+                      </div>
+                      <Button onClick={handleAddColumn} disabled={!newColumnName.trim()}>
+                        Spalte rechts hinzufügen
                       </Button>
-                    </DialogFooter>
-                  </div>
-                </DialogContent>
-              </Dialog>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
 
             {Object.keys(state.customFields).length > 0 && (
@@ -306,12 +398,12 @@ export function Step1CSVImport() {
               </div>
             )}
 
-            <div className="border rounded-md overflow-auto">
+            <div className="border rounded-md overflow-auto max-h-112">
               <Table>
                 <TableHeader>
                   <TableRow>
                     {Array.from({ length: columnCount }).map((_, index) => (
-                      <TableHead key={index} className="relative py-2">
+                      <TableHead key={index} className="sticky top-0 z-20 bg-card py-2">
                           <div className="text-xs font-medium">
                             Spalte {index + 1}
                             {headerRow && (
@@ -355,12 +447,55 @@ export function Step1CSVImport() {
                       ))}
                     </TableRow>
                   ))}
+                  {isAddingRow && (
+                    <TableRow>
+                      {Array.from({ length: columnCount }).map((_, cellIndex) => (
+                        <TableCell key={`new-row-${cellIndex}`}>
+                          <Input
+                            value={newRowValues[cellIndex] ?? ""}
+                            onChange={(e) =>
+                              setNewRowValues((prev) => {
+                                const next = [...prev];
+                                next[cellIndex] = e.target.value;
+                                return next;
+                              })
+                            }
+                            placeholder="Wert"
+                          />
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  )}
                 </TableBody>
               </Table>
               {displayData.length > 10 && (
                 <div className="p-2 text-sm text-muted-foreground text-center">
                   ... und {displayData.length - 10} weitere Zeilen
                 </div>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!isAddingRow ? (
+                <Button type="button" variant="outline" onClick={() => setIsAddingRow(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Neue Zeile
+                </Button>
+              ) : (
+                <>
+                  <Button type="button" onClick={handleAddRow}>
+                    Zeile hinzufügen
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setIsAddingRow(false);
+                      setNewRowValues(Array.from({ length: columnCount }, () => ""));
+                    }}
+                  >
+                    Abbrechen
+                  </Button>
+                </>
               )}
             </div>
 
