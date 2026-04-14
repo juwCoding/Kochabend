@@ -25,23 +25,71 @@ function buildMealsByCourse(distribution: Distribution[]): Record<Course, MealBu
     Nachspeise: [],
   };
 
-  for (let hi = 0; hi < distribution.length; hi++) {
-    const d = distribution[hi];
-    const guests: string[] = [];
-    for (const guestDist of distribution) {
-      for (const r of guestDist.guestRelations) {
-        if (r.hostTeamId === d.teamId && r.course === d.course) {
-          guests.push(guestDist.teamId);
+  const allTeamIds = distribution.map((d) => d.teamId);
+
+  for (const course of COURSE_ORDER) {
+    const hosts = distribution.filter((d) => d.course === course);
+    const hostIds = new Set(hosts.map((h) => h.teamId));
+    const diners = allTeamIds.filter((teamId) => !hostIds.has(teamId));
+
+    const preferredHosts = new Map<string, string[]>();
+    for (const teamId of diners) {
+      const d = distribution.find((dist) => dist.teamId === teamId);
+      const hostsForCourse = (d?.guestRelations ?? [])
+        .filter((r) => r.course === course && hostIds.has(r.hostTeamId))
+        .map((r) => r.hostTeamId);
+      preferredHosts.set(teamId, [...new Set(hostsForCourse)]);
+    }
+
+    const guestsByHost = new Map<string, string[]>();
+    for (const host of hosts) guestsByHost.set(host.teamId, []);
+
+    const dinersByConstraint = [...diners].sort(
+      (a, b) => (preferredHosts.get(a)?.length ?? 0) - (preferredHosts.get(b)?.length ?? 0)
+    );
+
+    const unassigned: string[] = [];
+    for (const dinerTeamId of dinersByConstraint) {
+      const prefs = preferredHosts.get(dinerTeamId) ?? [];
+      let selectedHostId: string | null = null;
+      let selectedLoad = Number.POSITIVE_INFINITY;
+
+      for (const hostId of prefs) {
+        const load = guestsByHost.get(hostId)?.length ?? Number.POSITIVE_INFINITY;
+        if (load < 2 && load < selectedLoad) {
+          selectedHostId = hostId;
+          selectedLoad = load;
         }
       }
+
+      if (!selectedHostId) {
+        unassigned.push(dinerTeamId);
+        continue;
+      }
+
+      guestsByHost.get(selectedHostId)?.push(dinerTeamId);
     }
-    const bubbleId = `${d.teamId}-${d.course}-${hi}`;
-    byCourse[d.course].push({
-      bubbleId,
-      hostTeamId: d.teamId,
-      guestTeamIds: guests,
-      kitchenId: d.kitchenId,
-    });
+
+    for (const dinerTeamId of unassigned) {
+      const fallbackHost = hosts
+        .map((h) => ({ hostId: h.teamId, load: guestsByHost.get(h.teamId)?.length ?? 0 }))
+        .filter((entry) => entry.load < 2)
+        .sort((a, b) => a.load - b.load)[0];
+      if (fallbackHost) {
+        guestsByHost.get(fallbackHost.hostId)?.push(dinerTeamId);
+      }
+    }
+
+    for (let hi = 0; hi < hosts.length; hi++) {
+      const host = hosts[hi];
+      const bubbleId = `${host.teamId}-${course}-${hi}`;
+      byCourse[course].push({
+        bubbleId,
+        hostTeamId: host.teamId,
+        guestTeamIds: (guestsByHost.get(host.teamId) ?? []).slice(0, 2),
+        kitchenId: host.kitchenId,
+      });
+    }
   }
 
   return byCourse;
@@ -56,14 +104,7 @@ function teamHue(teamId: string): number {
 }
 
 function collectTeamIds(distribution: Distribution[]): string[] {
-  const s = new Set<string>();
-  for (const d of distribution) {
-    s.add(d.teamId);
-    for (const r of d.guestRelations) {
-      s.add(r.guestTeamId);
-      s.add(r.hostTeamId);
-    }
-  }
+  const s = new Set(distribution.map((d) => d.teamId));
   return [...s];
 }
 

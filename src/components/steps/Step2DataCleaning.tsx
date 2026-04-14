@@ -219,6 +219,39 @@ function mergeCustomFieldValuesFromCsv(
   });
 }
 
+/**
+ * Synchronisiert _rawValues für die gemappten Enum-Felder aus der CSV.
+ * Wichtig bei Mapping-Änderungen in Schritt 1, damit Re-Mapping in Schritt 2 greift.
+ */
+function mergeMappedEnumRawValuesFromCsv(
+  persons: Person[],
+  csvData: string[][],
+  columnMapping: Record<string, string>
+): Person[] {
+  const preferenceCol = Object.entries(columnMapping).find(([, field]) => field === "preference")?.[0];
+  const kitchenCol = Object.entries(columnMapping).find(([, field]) => field === "kitchen")?.[0];
+  const courseCol = Object.entries(columnMapping).find(([, field]) => field === "coursePreference")?.[0];
+
+  const prefIdx = preferenceCol ? parseInt(preferenceCol.replace("column_", ""), 10) : -1;
+  const kitchenIdx = kitchenCol ? parseInt(kitchenCol.replace("column_", ""), 10) : -1;
+  const courseIdx = courseCol ? parseInt(courseCol.replace("column_", ""), 10) : -1;
+
+  return persons.map((person, i) => {
+    const row = csvData[i];
+    if (!row) return person;
+
+    return {
+      ...person,
+      _rawValues: {
+        ...person._rawValues,
+        preference: prefIdx >= 0 && prefIdx < row.length ? (row[prefIdx]?.trim() ?? "") : undefined,
+        kitchen: kitchenIdx >= 0 && kitchenIdx < row.length ? (row[kitchenIdx]?.trim() ?? "") : undefined,
+        coursePreference: courseIdx >= 0 && courseIdx < row.length ? (row[courseIdx]?.trim() ?? "") : undefined,
+      },
+    };
+  });
+}
+
 function buildTextSnapshotFromPerson(p: Partial<Person> & { customFieldValues?: Record<string, string> }): NonNullable<Person["textSnapshot"]> {
   return {
     name: p.name ?? "",
@@ -346,6 +379,7 @@ export function Step2DataCleaning() {
   const [mappingField, setMappingField] = useState<"kitchen" | "preference" | "coursePreference">("kitchen");
   const [newMappingRaw, setNewMappingRaw] = useState("");
   const [newMappingValue, setNewMappingValue] = useState("");
+  const [mapEmptyRaw, setMapEmptyRaw] = useState(false);
   const [isRawSuggestionsOpen, setIsRawSuggestionsOpen] = useState(false);
   const sortSpecs = useMemo(
     () =>
@@ -439,6 +473,7 @@ export function Step2DataCleaning() {
       let normalized = state.persons.map((p) => recomputeEffectiveFields(p, state.valueMappings));
       if (customCsvSourceKey !== customCsvSourceRef.current) {
         customCsvSourceRef.current = customCsvSourceKey;
+        normalized = mergeMappedEnumRawValuesFromCsv(normalized, state.csvData, state.columnMapping);
         normalized = mergeCustomFieldValuesFromCsv(normalized, state.csvData, state.columnMapping);
         normalized = normalized.map((p) => recomputeEffectiveFields(p, state.valueMappings));
       }
@@ -644,17 +679,17 @@ export function Step2DataCleaning() {
   );
 
   const isMappingDuplicate = useMemo(() => {
-    const raw = newMappingRaw.trim();
-    if (!raw) return false;
+    const raw = mapEmptyRaw ? "" : newMappingRaw.trim();
+    if (!mapEmptyRaw && !raw) return false;
     const lower = raw.toLowerCase();
     return state.valueMappings.some(
       (m) => m.field === activeMappingField && m.rawValue.trim().toLowerCase() === lower
     );
-  }, [state.valueMappings, activeMappingField, newMappingRaw]);
+  }, [state.valueMappings, activeMappingField, newMappingRaw, mapEmptyRaw]);
 
   const handleAddMapping = () => {
-    const raw = newMappingRaw.trim();
-    if (!raw || !newMappingValue.trim()) return;
+    const raw = mapEmptyRaw ? "" : newMappingRaw.trim();
+    if ((!mapEmptyRaw && !raw) || !newMappingValue.trim()) return;
     if (isMappingDuplicate) return;
 
     dispatch({
@@ -671,6 +706,7 @@ export function Step2DataCleaning() {
 
     setNewMappingRaw("");
     setNewMappingValue("");
+    setMapEmptyRaw(false);
     setIsRawSuggestionsOpen(false);
   };
 
@@ -796,6 +832,7 @@ export function Step2DataCleaning() {
                       window.setTimeout(() => setIsRawSuggestionsOpen(false), 120);
                     }}
                     placeholder="z.B. ja"
+                    disabled={mapEmptyRaw}
                     className={isMappingDuplicate ? "border-destructive" : undefined}
                     aria-invalid={isMappingDuplicate}
                     aria-expanded={isRawSuggestionsOpen}
@@ -823,6 +860,20 @@ export function Step2DataCleaning() {
                     </div>
                   )}
                 </div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={mapEmptyRaw}
+                    onChange={(e) => {
+                      setMapEmptyRaw(e.target.checked);
+                      if (e.target.checked) {
+                        setNewMappingRaw("");
+                        setIsRawSuggestionsOpen(false);
+                      }
+                    }}
+                  />
+                  Leeren CSV-Wert mappen
+                </label>
               </div>
               <div>
                 <label className="text-sm font-medium">Zugeordneter Wert</label>
@@ -858,9 +909,14 @@ export function Step2DataCleaning() {
                 Dieser Rohwert ist für dieses Feld bereits vergeben. Zum Ändern den bestehenden Eintrag löschen.
               </p>
             )}
+            {isMappingDuplicate && mapEmptyRaw && (
+              <p className="text-sm text-destructive">
+                Der leere CSV-Wert ist für dieses Feld bereits vergeben.
+              </p>
+            )}
             <Button
               onClick={handleAddMapping}
-              disabled={!newMappingRaw.trim() || !newMappingValue.trim() || isMappingDuplicate}
+              disabled={(!mapEmptyRaw && !newMappingRaw.trim()) || !newMappingValue.trim() || isMappingDuplicate}
             >
               Mapping hinzufügen
             </Button>
@@ -919,7 +975,8 @@ export function Step2DataCleaning() {
                   .map((mapping, index) => (
                     <div key={index} className="flex items-center justify-between p-2 border rounded">
                       <span className="text-sm">
-                        „{mapping.rawValue}“ → {formatSuggestedMapped(mapping.field, mapping.mappedValue)}
+                        „{mapping.rawValue === "" ? "(leer)" : mapping.rawValue}“ →{" "}
+                        {formatSuggestedMapped(mapping.field, mapping.mappedValue)}
                       </span>
                       <Button
                         variant="ghost"

@@ -55,12 +55,11 @@ export function resolvePreferenceRaw(
   mappings: ValueMapping[]
 ): ResolvedField<FoodPreference> {
   const trimmed = raw.trim();
-  if (!trimmed) return { value: null, source: null };
-
   const match = findMapping(mappings, "preference", trimmed);
   if (match && isFoodPreference(match.mappedValue)) {
     return { value: match.mappedValue, source: sourceFromMatch(match) };
   }
+  if (!trimmed) return { value: null, source: null };
   return { value: null, source: null };
 }
 
@@ -69,12 +68,11 @@ export function resolveKitchenRaw(
   mappings: ValueMapping[]
 ): ResolvedField<KitchenStatus> {
   const trimmed = raw.trim();
-  if (!trimmed) return { value: null, source: null };
-
   const match = findMapping(mappings, "kitchen", trimmed);
   if (match && isKitchenStatus(match.mappedValue)) {
     return { value: match.mappedValue, source: sourceFromMatch(match) };
   }
+  if (!trimmed) return { value: null, source: null };
   return { value: null, source: null };
 }
 
@@ -83,12 +81,11 @@ export function resolveCourseRaw(
   mappings: ValueMapping[]
 ): ResolvedField<CoursePreference> {
   const trimmed = raw.trim();
-  if (!trimmed) return { value: null, source: null };
-
   const match = findMapping(mappings, "coursePreference", trimmed);
   if (match && isCoursePreference(match.mappedValue)) {
     return { value: match.mappedValue, source: sourceFromMatch(match) };
   }
+  if (!trimmed) return { value: null, source: null };
   return { value: null, source: null };
 }
 

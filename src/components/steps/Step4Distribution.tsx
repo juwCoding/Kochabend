@@ -218,10 +218,6 @@ export function Step4Distribution() {
       {state.distribution.length > 0 && (
         <div className="space-y-3">
           <h3 className="text-lg font-semibold">Abend-Routen</h3>
-          <p className="text-sm text-muted-foreground">
-            Drei Gänge als Spalten: Pro Runde treffen sich Gastgeber und Gäste in einer Bubble. Die farbigen
-            Pfeile folgen jedem Team durch den Abend.
-          </p>
           <DistributionFlowVisualization
             distribution={state.distribution}
             teams={state.teams}

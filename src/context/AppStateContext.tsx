@@ -34,6 +34,107 @@ interface AppStateWithHistory {
   maxHistorySize: number;
 }
 
+const STORAGE_KEY = "kochabend_state";
+
+type PersistenceMode =
+  | "full-history"
+  | "history-20"
+  | "history-5"
+  | "current-only"
+  | "current-without-raw-csv"
+  | "current-without-csv"
+  | "failed";
+
+function isQuotaExceededError(error: unknown): boolean {
+  if (!(error instanceof DOMException)) return false;
+  return (
+    error.name === "QuotaExceededError" ||
+    error.name === "NS_ERROR_DOM_QUOTA_REACHED" ||
+    error.code === 22 ||
+    error.code === 1014
+  );
+}
+
+function trimHistoryToCurrent(
+  state: AppStateWithHistory,
+  limit: number
+): Pick<AppStateWithHistory, "history" | "historyIndex"> {
+  if (limit <= 1) {
+    return { history: [state.current], historyIndex: 0 };
+  }
+
+  const endExclusive = Math.min(state.history.length, state.historyIndex + 1);
+  const start = Math.max(0, endExclusive - limit);
+  const history = state.history.slice(start, endExclusive);
+  return {
+    history,
+    historyIndex: history.length - 1,
+  };
+}
+
+function saveStateToStorage(state: AppStateWithHistory): PersistenceMode {
+  const attempts: Array<{ mode: PersistenceMode; payload: AppStateWithHistory }> = [
+    {
+      mode: "full-history",
+      payload: state,
+    },
+    {
+      mode: "history-20",
+      payload: {
+        ...state,
+        ...trimHistoryToCurrent(state, 20),
+      },
+    },
+    {
+      mode: "history-5",
+      payload: {
+        ...state,
+        ...trimHistoryToCurrent(state, 5),
+      },
+    },
+    {
+      mode: "current-only",
+      payload: {
+        ...state,
+        history: [state.current],
+        historyIndex: 0,
+      },
+    },
+    {
+      mode: "current-without-raw-csv",
+      payload: {
+        ...state,
+        current: { ...state.current, csvRawData: [] },
+        history: [{ ...state.current, csvRawData: [] }],
+        historyIndex: 0,
+      },
+    },
+    {
+      mode: "current-without-csv",
+      payload: {
+        ...state,
+        current: { ...state.current, csvData: [], csvRawData: [] },
+        history: [{ ...state.current, csvData: [], csvRawData: [] }],
+        historyIndex: 0,
+      },
+    },
+  ];
+
+  for (const attempt of attempts) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(attempt.payload));
+      return attempt.mode;
+    } catch (error) {
+      if (!isQuotaExceededError(error)) {
+        console.error("Failed to save state to localStorage:", error);
+        return "failed";
+      }
+    }
+  }
+
+  return "failed";
+}
+
 function hydrateAppStateShape(base: AppState): AppState {
   const validSortSpecs = (specs: AppState["step2SortSpecs"] | AppState["step3SortSpecs"]) =>
     Array.isArray(specs)
@@ -67,7 +168,7 @@ function hydrateAppStateShape(base: AppState): AppState {
 // Load from localStorage
 const loadStateFromStorage = (): AppStateWithHistory | null => {
   try {
-    const stored = localStorage.getItem("kochabend_state");
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       const base = parsed.current || getDefaultAppState();
@@ -281,14 +382,27 @@ const AppStateContext = createContext<AppStateContextType | undefined>(undefined
 // Provider
 export function AppStateProvider({ children }: { children: ReactNode }) {
   const [stateWithHistory, dispatch] = useReducer(appStateReducer, initialState);
+  const lastPersistenceModeRef = React.useRef<PersistenceMode | null>(null);
 
   // Save to localStorage whenever state changes
   React.useEffect(() => {
-    try {
-      localStorage.setItem("kochabend_state", JSON.stringify(stateWithHistory));
-    } catch (error) {
-      console.error("Failed to save state to localStorage:", error);
+    const mode = saveStateToStorage(stateWithHistory);
+
+    if (mode === lastPersistenceModeRef.current) return;
+
+    if (mode === "failed") {
+      console.error(
+        "Failed to save state to localStorage: storage quota exceeded for all fallback modes."
+      );
+    } else if (mode !== "full-history") {
+      console.warn(
+        `Saved app state in reduced mode (${mode}) due to localStorage quota limits.`
+      );
+    } else if (lastPersistenceModeRef.current && lastPersistenceModeRef.current !== "full-history") {
+      console.info("localStorage persistence recovered to full history mode.");
     }
+
+    lastPersistenceModeRef.current = mode;
   }, [stateWithHistory]);
 
   const undo = useCallback(() => {

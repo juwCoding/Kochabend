@@ -16,11 +16,13 @@ import {
   combinePreference,
   preferenceRank,
   getTeamKitchenOptions,
+  getTeamCoursePreferences,
   countWastedTeamSlots,
   getPersonIdsWithDuplicateTeamAssignments,
   orphanTeamPersonIds,
 } from "@/utils/teamDerived";
 import { stableTeamId } from "@/utils/stableTeamId";
+import { isCourseColumnMapped } from "@/utils/matching";
 
 const KITCHEN_OPTIONS_ORDER: KitchenStatus[] = [
   "kann_gekocht_werden",
@@ -81,7 +83,7 @@ function teamPersonIdSet(teams: { person1Id: string; person2Id: string }[]): Set
   return new Set(teams.flatMap((t) => [t.person1Id, t.person2Id]));
 }
 
-type TeamTableSortKey = "person1" | "person2" | "kitchen" | "preference";
+type TeamTableSortKey = "person1" | "person2" | "kitchen" | "preference" | "coursePreferences";
 type TeamSortSpec = { key: TeamTableSortKey; dir: "asc" | "desc" };
 
 interface TeamWithDetails {
@@ -91,6 +93,7 @@ interface TeamWithDetails {
   kitchenOptions: string[];
   chosenPreference: FoodPreference;
   preferenceNote: string | null;
+  coursePreferences: string[];
 }
 
 function sortComparableForTeamColumn(team: TeamWithDetails, key: TeamTableSortKey): string {
@@ -103,6 +106,8 @@ function sortComparableForTeamColumn(team: TeamWithDetails, key: TeamTableSortKe
       return team.kitchenOptions.join(" ");
     case "preference":
       return `${team.chosenPreference} ${team.preferenceNote ?? ""}`.trim();
+    case "coursePreferences":
+      return team.coursePreferences.join(" ");
     default:
       return "";
   }
@@ -191,12 +196,17 @@ export function Step3TeamAssignment() {
   const personsAssignedToTeams = state.persons.length - availablePersons.length;
 
   const kitchenStats = useMemo(() => kitchenCountsByOption(state.persons), [state.persons]);
+  const shouldShowCoursePreferences = useMemo(
+    () => isCourseColumnMapped(state.columnMapping),
+    [state.columnMapping]
+  );
 
   const teamsWithDetails = useMemo(() => {
     return state.teams.map((team) => {
       const person1 = state.persons.find((p) => p.id === team.person1Id);
       const person2 = state.persons.find((p) => p.id === team.person2Id);
       const kitchenOptions = getTeamKitchenOptions(team, state.persons);
+      const coursePreferences = getTeamCoursePreferences(team, state.persons, shouldShowCoursePreferences);
 
       const person1Preference = person1?.preference ?? "egal";
       const person2Preference = person2?.preference ?? "egal";
@@ -215,9 +225,10 @@ export function Step3TeamAssignment() {
         kitchenOptions,
         chosenPreference,
         preferenceNote,
+        coursePreferences,
       };
     });
-  }, [state.teams, state.persons]);
+  }, [state.teams, state.persons, shouldShowCoursePreferences]);
 
   const sortedTeamsWithDetails = useMemo(() => {
     if (teamSortSpecs.length === 0) return teamsWithDetails;
@@ -484,12 +495,29 @@ export function Step3TeamAssignment() {
                     onToggle={toggleTeamColumnSort}
                     onPromote={promoteTeamColumnSort}
                   />
+                  {shouldShowCoursePreferences && (
+                    <TeamTableSortHead
+                      label="Speisenpräferenz"
+                      columnKey="coursePreferences"
+                      sortSpecs={teamSortSpecs}
+                      onToggle={toggleTeamColumnSort}
+                      onPromote={promoteTeamColumnSort}
+                    />
+                  )}
                   <TableHead className="w-20">Aktionen</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {sortedTeamsWithDetails.map(
-                  ({ team, person1, person2, kitchenOptions, chosenPreference, preferenceNote }) => (
+                  ({
+                    team,
+                    person1,
+                    person2,
+                    kitchenOptions,
+                    chosenPreference,
+                    preferenceNote,
+                    coursePreferences,
+                  }) => (
                   <TableRow key={team.id}>
                     <TableCell>{person1?.name ?? "?"}</TableCell>
                     <TableCell>{person2?.name ?? "?"}</TableCell>
@@ -515,6 +543,24 @@ export function Step3TeamAssignment() {
                         <span className="ml-2 text-muted-foreground">{preferenceNote}</span>
                       )}
                     </TableCell>
+                    {shouldShowCoursePreferences && (
+                      <TableCell>
+                        {coursePreferences.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {coursePreferences.map((coursePreference, idx) => (
+                              <span
+                                key={`${team.id}-course-preference-${idx}`}
+                                className="inline-flex items-center rounded-md bg-muted px-2 py-1 text-xs font-medium"
+                              >
+                                {coursePreference}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Button variant="ghost" size="icon" onClick={() => handleDeleteTeam(team.id)}>
                         <Trash2 className="h-4 w-4" />

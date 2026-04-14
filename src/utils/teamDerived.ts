@@ -1,4 +1,4 @@
-import type { FoodPreference, Person, Team } from "@/types/models";
+import type { Course, CoursePreference, FoodPreference, Person, Team } from "@/types/models";
 
 /** Ob die eigene Küchen-Adresse als Koch-Ort für das Team zählt („bei mir“). Nicht bei „beim Partner“. */
 export function hostsAtOwnKitchen(kitchen?: string): boolean {
@@ -81,5 +81,31 @@ export function isStep3Valid(teams: Team[], persons: Person[]): boolean {
 export function getTeamPreference(team: Team, persons: Person[]): FoodPreference {
   const { person1, person2 } = getTeamPersons(team, persons);
   return combinePreference(person1?.preference, person2?.preference);
+}
+
+function asCoursePreference(value: CoursePreference | undefined): Course | null {
+  if (value === "Vorspeise" || value === "Hauptgang" || value === "Nachspeise") {
+    return value;
+  }
+  return null;
+}
+
+/**
+ * Aggregiert die Speisen-/Gangpräferenzen aus den zwei Team-Personen.
+ * - Spalte nicht in Schritt 1 gewählt: []
+ * - Spalte gewählt: bis zu zwei Einträge (ohne "keine")
+ */
+export function getTeamCoursePreferences(
+  team: Team,
+  persons: Person[],
+  includeCoursePreference: boolean
+): Course[] {
+  if (!includeCoursePreference) return [];
+  const { person1, person2 } = getTeamPersons(team, persons);
+  const preferences: Array<Course | null> = [
+    asCoursePreference(person1?.coursePreference),
+    asCoursePreference(person2?.coursePreference),
+  ];
+  return Array.from(new Set(preferences.filter((pref): pref is Course => pref !== null)));
 }
 
