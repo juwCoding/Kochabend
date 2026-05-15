@@ -84,7 +84,7 @@ export function getTeamPreference(team: Team, persons: Person[]): FoodPreference
 }
 
 function asCoursePreference(value: CoursePreference | undefined): Course | null {
-  if (value === "Vorspeise" || value === "Hauptgang" || value === "Nachspeise") {
+  if (value === "Vorspeise" || value === "Hauptspeise" || value === "Nachspeise") {
     return value;
   }
   return null;

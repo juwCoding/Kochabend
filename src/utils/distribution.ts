@@ -20,7 +20,7 @@ type GuestVisit = { guestTeamId: string; hostTeamId: string; course: Course };
 // Constants & helpers
 // ---------------------------------------------------------------------------
 
-const ALL_COURSES: Course[] = ["Vorspeise", "Hauptgang", "Nachspeise"];
+const ALL_COURSES: Course[] = ["Vorspeise", "Hauptspeise", "Nachspeise"];
 const MAX_ATTEMPTS = 50;
 
 function shuffle<T>(arr: T[]): T[] {
@@ -51,14 +51,14 @@ function dietaryScore(a: FoodPreference, b: FoodPreference): number {
 
 /**
  * Balanced target sizes for 3 courses.
- * Remainder is distributed Vorspeise → Hauptgang → Nachspeise.
+ * Remainder is distributed Vorspeise → Hauptspeise → Nachspeise.
  */
 function courseTargetSizes(teamCount: number): Record<Course, number> {
   const base = Math.floor(teamCount / 3);
   const rem = teamCount % 3;
   return {
     Vorspeise: base + (rem >= 1 ? 1 : 0),
-    Hauptgang: base + (rem >= 2 ? 1 : 0),
+    Hauptspeise: base + (rem >= 2 ? 1 : 0),
     Nachspeise: base,
   };
 }
@@ -80,7 +80,7 @@ function assignCoursesAndKitchens(infos: TeamInfo[]): CourseSlot[] {
   const targets = courseTargetSizes(infos.length);
   const slots: CourseSlot[] = [];
   const remaining = new Set(infos.map((i) => i.team.id));
-  const filled: Record<Course, number> = { Vorspeise: 0, Hauptgang: 0, Nachspeise: 0 };
+  const filled: Record<Course, number> = { Vorspeise: 0, Hauptspeise: 0, Nachspeise: 0 };
   const kitchenUsed = new Map<string, Set<Course>>();
 
   function isKitchenFree(kitchenId: string, course: Course): boolean {
@@ -287,7 +287,7 @@ function validateHardConstraints(
   // 2) Balanced course sizes
   const courseCounts: Record<Course, number> = {
     Vorspeise: 0,
-    Hauptgang: 0,
+    Hauptspeise: 0,
     Nachspeise: 0,
   };
   for (const d of distribution) courseCounts[d.course]++;

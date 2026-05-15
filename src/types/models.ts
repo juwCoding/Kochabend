@@ -8,10 +8,10 @@ export type KitchenStatus =
   | "kann_nicht_gekocht_werden"; // in meiner kann nicht gekocht werden
 
 // Gericht-Präferenz
-export type CoursePreference = "keine" | "Vorspeise" | "Hauptgang" | "Nachspeise";
+export type CoursePreference = "keine" | "Vorspeise" | "Hauptspeise" | "Nachspeise";
 
 // Gang-Typ
-export type Course = "Vorspeise" | "Hauptgang" | "Nachspeise";
+export type Course = "Vorspeise" | "Hauptspeise" | "Nachspeise";
 
 // Person
 export interface Person {

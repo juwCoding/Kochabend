@@ -3,11 +3,11 @@ import type { Course, Distribution, Person, Team } from "@/types/models";
 import { getTeamPreference } from "@/utils/teamDerived";
 import { cn } from "@/lib/utils";
 
-const COURSE_ORDER: Course[] = ["Vorspeise", "Hauptgang", "Nachspeise"];
+const COURSE_ORDER: Course[] = ["Vorspeise", "Hauptspeise", "Nachspeise"];
 
 const COURSE_LABEL: Record<Course, string> = {
   Vorspeise: "Vorspeise",
-  Hauptgang: "Hauptgang",
+  Hauptspeise: "Hauptspeise",
   Nachspeise: "Nachspeise",
 };
 
@@ -31,7 +31,7 @@ function buildMealsByCourse(
 ): Record<Course, MealBubble[]> {
   const byCourse: Record<Course, MealBubble[]> = {
     Vorspeise: [],
-    Hauptgang: [],
+    Hauptspeise: [],
     Nachspeise: [],
   };
 
@@ -216,8 +216,8 @@ export function DistributionFlowVisualization({
     for (const teamId of allTeamIds) {
       const reg = registryRef.current;
       const vR = collectEdgeMids(reg, teamId, "Vorspeise", cr, "right");
-      const hL = collectEdgeMids(reg, teamId, "Hauptgang", cr, "left");
-      const hR = collectEdgeMids(reg, teamId, "Hauptgang", cr, "right");
+      const hL = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "left");
+      const hR = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "right");
       const nL = collectEdgeMids(reg, teamId, "Nachspeise", cr, "left");
 
       const hue = teamHue(teamId);
@@ -225,7 +225,7 @@ export function DistributionFlowVisualization({
 
       if (vR && hL) {
         result.push({
-          key: `${teamId}-vorspeise-hauptgang`,
+          key: `${teamId}-vorspeise-hauptspeise`,
           teamId,
           d: cubicBetween(vR, hL),
           hue,
@@ -234,7 +234,7 @@ export function DistributionFlowVisualization({
       }
       if (hR && nL) {
         result.push({
-          key: `${teamId}-hauptgang-nachspeise`,
+          key: `${teamId}-hauptspeise-nachspeise`,
           teamId,
           d: cubicBetween(hR, nL),
           hue,

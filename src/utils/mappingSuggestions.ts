@@ -80,7 +80,7 @@ function buildLabelSets(): Record<SuggestionField, Map<string, Set<string>>> {
 
   add("coursePreference", "keine", formatCourseLabel("keine"));
   add("coursePreference", "Vorspeise", formatCourseLabel("Vorspeise"));
-  add("coursePreference", "Hauptgang", formatCourseLabel("Hauptgang"));
+  add("coursePreference", "Hauptspeise", formatCourseLabel("Hauptspeise"));
   add("coursePreference", "Nachspeise", formatCourseLabel("Nachspeise"));
 
   return out;

@@ -300,7 +300,7 @@ export function Step1CSVImport() {
                     <div className="space-y-1">
                       <p className="font-semibold text-foreground">Optional</p>
                       <p><strong>Partner:</strong> Name der Partnerperson, damit ein gemeinsames Team gebildet werden kann.</p>
-                      <p><strong>Gericht-Präferenz:</strong> Wunschgang (Vorspeise, Hauptgang, Nachspeise oder keine Präferenz).</p>
+                      <p><strong>Gericht-Präferenz:</strong> Wunschgang (Vorspeise, Hauptspeise, Nachspeise oder keine Präferenz).</p>
                       <p><strong>Freifelder:</strong> Zusätzliche CSV-Spalten ohne feste Funktion; werden als Zusatzinfos übernommen.</p>
                     </div>
                   </div>

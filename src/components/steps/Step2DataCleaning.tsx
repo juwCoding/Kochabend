@@ -763,7 +763,7 @@ export function Step2DataCleaning() {
 
   const kitchenOptions: KitchenStatus[] = ["kann_gekocht_werden", "partner_kocht", "kann_nicht_gekocht_werden"];
   const preferenceOptions: FoodPreference[] = ["vegan", "vegetarisch", "egal"];
-  const courseOptions: CoursePreference[] = ["keine", "Vorspeise", "Hauptgang", "Nachspeise"];
+  const courseOptions: CoursePreference[] = ["keine", "Vorspeise", "Hauptspeise", "Nachspeise"];
 
   return (
     <div className="space-y-6">

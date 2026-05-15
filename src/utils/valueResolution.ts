@@ -27,7 +27,7 @@ function isKitchenStatus(s: string): s is KitchenStatus {
 }
 
 function isCoursePreference(s: string): s is CoursePreference {
-  return s === "keine" || s === "Vorspeise" || s === "Hauptgang" || s === "Nachspeise";
+  return s === "keine" || s === "Vorspeise" || s === "Hauptspeise" || s === "Nachspeise";
 }
 
 /** Letzte passende Zeile gewinnt (überschreibt frühere Einträge). */

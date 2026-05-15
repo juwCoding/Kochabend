@@ -43,7 +43,7 @@ const VALID_KITCHEN = [
   "partner_kocht",
   "kann_nicht_gekocht_werden",
 ] as const;
-const VALID_COURSE = ["keine", "Vorspeise", "Hauptgang", "Nachspeise"] as const;
+const VALID_COURSE = ["keine", "Vorspeise", "Hauptspeise", "Nachspeise"] as const;
 
 /** Gericht-Präferenz nur, wenn die Spalte in Schritt 1 zugeordnet wurde. */
 export function isCourseColumnMapped(columnMapping: Record<string, string>): boolean {

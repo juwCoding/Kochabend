@@ -282,7 +282,7 @@ function getHostVisits(
 ): Distribution[] {
   const courseOrder: Record<Distribution["course"], number> = {
     Vorspeise: 0,
-    Hauptgang: 1,
+    Hauptspeise: 1,
     Nachspeise: 2,
   };
   return allDistributions

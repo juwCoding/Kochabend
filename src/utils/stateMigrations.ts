@@ -1,4 +1,4 @@
-import type { AppState } from "@/types/models";
+import type { AppState, Course, CoursePreference } from "@/types/models";
 import { DEFAULT_FAVORITE_PLACEHOLDERS } from "@/defaultValueMappings";
 import { generateAllInvitations } from "@/utils/templateEngine";
 
@@ -105,6 +105,39 @@ export function parseStoredEnvelopeVersion(json: string): number {
   return 1;
 }
 
+function migrateCoursePreferenceField(
+  value: CoursePreference | undefined
+): CoursePreference | undefined {
+  if ((value as string | undefined) === "Hauptgang") return "Hauptspeise";
+  return value;
+}
+
+function migrateCourseField(value: Course): Course {
+  if ((value as string) === "Hauptgang") return "Hauptspeise";
+  return value;
+}
+
+function migrateHauptgangToHauptspeise(state: AppState): Pick<AppState, "persons" | "valueMappings" | "distribution"> {
+  return {
+    persons: state.persons.map((person) => ({
+      ...person,
+      coursePreference: migrateCoursePreferenceField(person.coursePreference),
+      coursePreferenceManual: migrateCoursePreferenceField(person.coursePreferenceManual),
+    })),
+    valueMappings: state.valueMappings.map((mapping) => {
+      if (mapping.field !== "coursePreference") return mapping;
+      return {
+        ...mapping,
+        mappedValue: mapping.mappedValue === "Hauptgang" ? "Hauptspeise" : mapping.mappedValue,
+      };
+    }),
+    distribution: state.distribution.map((entry) => ({
+      ...entry,
+      course: migrateCourseField(entry.course),
+    })),
+  };
+}
+
 function migrateV1ToV2(state: AppState): AppState {
   const customFieldNames = Object.values(state.customFields)
     .map((name) => name.trim())
@@ -128,6 +161,7 @@ function migrateV1ToV2(state: AppState): AppState {
 
   let next: AppState = {
     ...state,
+    ...migrateHauptgangToHauptspeise(state),
     invitationTemplate,
     generatedInvitations,
     favoritePlaceholders,

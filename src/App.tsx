@@ -190,7 +190,7 @@ function AppContent() {
               >
                 <p>
                   Dieses Tool hilft dir, einen Kochabend strukturiert zu planen: aus Teilnehmenden-Daten werden saubere Teams,
-                  eine faire Verteilung auf Vorspeise/Hauptgang/Nachspeise und am Ende klare Einladungsinfos.
+                  eine faire Verteilung auf Vorspeise/Hauptspeise/Nachspeise und am Ende klare Einladungsinfos.
                 </p>
                 <p className="mt-2">
                   Empfohlener Start: erst eine Umfrage mit allen relevanten Angaben (z. B. Name, Präferenz, Intoleranzen,

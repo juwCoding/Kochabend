@@ -57,7 +57,7 @@ export function Step4Distribution() {
   const cookingRowsByCourse = useMemo(() => {
     const byCourse: Record<Course, { dist: Distribution; team: Team | null }[]> = {
       Vorspeise: [],
-      Hauptgang: [],
+      Hauptspeise: [],
       Nachspeise: [],
     };
     for (const dist of state.distribution) {
@@ -141,7 +141,7 @@ export function Step4Distribution() {
 
   const courseLabels: Record<Course, string> = {
     Vorspeise: "Vorspeise",
-    Hauptgang: "Hauptgang",
+    Hauptspeise: "Hauptspeise",
     Nachspeise: "Nachspeise",
   };
 
