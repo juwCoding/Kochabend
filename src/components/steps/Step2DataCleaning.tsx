@@ -50,6 +50,7 @@ type DataTableSortKey =
   | "partner"
   | "kitchen"
   | "kitchenAddress"
+  | "phoneNumber"
   | "coursePreference"
   | `custom:${string}`;
 
@@ -70,6 +71,8 @@ function sortComparableForColumn(person: Person, key: DataTableSortKey): string 
       return formatKitchenLabel(person.kitchen ?? "");
     case "kitchenAddress":
       return normText(person.kitchenAddress);
+    case "phoneNumber":
+      return normText(person.phoneNumber);
     case "coursePreference":
       return formatCourseLabel(person.coursePreference ?? "");
     default:
@@ -206,6 +209,7 @@ function mergeCustomFieldValuesFromCsv(
       intolerances: person.intolerances ?? "",
       partner: person.partner ?? "",
       kitchenAddress: person.kitchenAddress ?? "",
+      phoneNumber: person.phoneNumber ?? "",
       custom: {},
     };
     return {
@@ -258,6 +262,7 @@ function buildTextSnapshotFromPerson(p: Partial<Person> & { customFieldValues?: 
     intolerances: p.intolerances ?? "",
     partner: p.partner ?? "",
     kitchenAddress: p.kitchenAddress ?? "",
+    phoneNumber: p.phoneNumber ?? "",
     custom: { ...(p.customFieldValues ?? {}) },
   };
 }
@@ -533,6 +538,9 @@ export function Step2DataCleaning() {
               break;
             case "kitchenAddress":
               person.kitchenAddress = rawValue;
+              break;
+            case "phoneNumber":
+              person.phoneNumber = rawValue;
               break;
             case "coursePreference":
               person._rawValues!.coursePreference = rawValue;
@@ -1047,6 +1055,13 @@ export function Step2DataCleaning() {
                     onToggle={toggleColumnSort}
                     onPromote={promoteColumnSort}
                   />
+                  <DataTableSortHead
+                    label="Telefonnummer"
+                    columnKey="phoneNumber"
+                    sortSpecs={activeSortSpecs}
+                    onToggle={toggleColumnSort}
+                    onPromote={promoteColumnSort}
+                  />
                   {isCourseColumnMappedHere && (
                     <DataTableSortHead
                       label="Gericht-Präferenz"
@@ -1264,6 +1279,21 @@ export function Step2DataCleaning() {
                           errorClassName={
                             kitchenAddressIssues.length > 0 ? "text-destructive font-medium" : undefined
                           }
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <TextFieldStack
+                          value={person.phoneNumber ?? ""}
+                          original={person.textSnapshot?.phoneNumber}
+                          editing={editingPersonId === person.id}
+                          input={
+                            <Input
+                              value={person.phoneNumber ?? ""}
+                              onChange={(e) => handleUpdatePerson(person.id, "phoneNumber", e.target.value)}
+                              onBlur={() => setEditingPersonId(null)}
+                            />
+                          }
+                          onViewClick={() => setEditingPersonId(person.id)}
                         />
                       </TableCell>
                       {isCourseColumnMappedHere && (

@@ -21,7 +21,7 @@ const STEPS = [
   { title: "Einladungen", component: Step5Invitations },
 ];
 
-const REQUIRED_FIELDS: Array<keyof typeof import("@/types/models").COLUMN_FIELDS> = ["name", "preference", "intolerances", "kitchen", "kitchenAddress"];
+const REQUIRED_FIELDS: Array<keyof typeof import("@/types/models").COLUMN_FIELDS> = ["name", "preference", "intolerances", "kitchen", "kitchenAddress", "phoneNumber"];
 const GENERAL_EXPLANATION_KEY = "general";
 
 function AppContent() {

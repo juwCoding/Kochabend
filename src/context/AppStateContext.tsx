@@ -341,8 +341,16 @@ function hydrateAppStateShape(base: AppState): AppState {
     distribution
   );
 
+  const persons = Array.isArray(base.persons)
+    ? base.persons.map((p) => ({
+        ...p,
+        phoneNumber: typeof p.phoneNumber === "string" ? p.phoneNumber : "",
+      }))
+    : [];
+
   return {
     ...base,
+    persons,
     currentStep: clampWizardStepIndex(
       typeof base.currentStep === "number" ? base.currentStep : 0
     ),

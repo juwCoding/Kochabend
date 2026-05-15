@@ -45,18 +45,22 @@ export const DEFAULT_VALUE_MAPPINGS: ValueMapping[] = [
 /** Default favorite placeholder ids (v2). */
 export const DEFAULT_FAVORITE_PLACEHOLDERS: readonly string[] = [
   "Person.Name",
+  "Person.Telefonnummer",
   "team.Unverträglichkeiten",
   "team.Adresse",
   "team.Gang",
   "team.Ernährungsform",
   "team.Gäste",
   "Partner.Name",
+  "Partner.Telefonnummer",
   "Gastgeber1.Gang",
   "Gastgeber1.PersonMitKüche.Adresse",
   "Gastgeber1.PersonMitKüche.Name",
+  "Gastgeber1.PersonMitKüche.Telefonnummer",
   "Gastgeber2.Gang",
   "Gastgeber2.PersonMitKüche.Adresse",
   "Gastgeber2.PersonMitKüche.Name",
+  "Gastgeber2.PersonMitKüche.Telefonnummer",
 ];
 
 /** Vollständiger App-Startzustand inkl. Standard-Mappings. */

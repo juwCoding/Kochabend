@@ -9,7 +9,7 @@ import { parseCSVFile } from "@/utils/csvParser";
 import { COLUMN_FIELDS, type ColumnField } from "@/types/models";
 import { Upload, Plus, X } from "lucide-react";
 
-const REQUIRED_FIELDS: ColumnField[] = ["name", "preference", "intolerances", "kitchen", "kitchenAddress"];
+const REQUIRED_FIELDS: ColumnField[] = ["name", "preference", "intolerances", "kitchen", "kitchenAddress", "phoneNumber"];
 
 export function Step1CSVImport() {
   const { state, dispatch } = useAppState();
@@ -296,6 +296,7 @@ export function Step1CSVImport() {
                       <p><strong>Unverträglichkeiten:</strong> Allergien oder Unverträglichkeiten als Freitext.</p>
                       <p><strong>Küche:</strong> Gibt an, ob in der eigenen Küche gekocht werden kann, beim Partner gekocht wird oder nicht.</p>
                       <p><strong>Küchen-Adresse:</strong> Adresse der Küche, die für das Hosting verwendet wird.</p>
+                      <p><strong>Telefonnummer:</strong> Telefonnummer der teilnehmenden Person.</p>
                     </div>
                     <div className="space-y-1">
                       <p className="font-semibold text-foreground">Optional</p>

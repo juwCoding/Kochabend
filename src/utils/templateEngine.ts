@@ -13,6 +13,7 @@ const PERSON_FIELD_TOKENS: Record<string, string> = {
   partner: "Partner",
   kitchen: "Küche",
   kitchenAddress: "Adresse",
+  phoneNumber: "Telefonnummer",
   coursePreference: "Gericht-Präferenz",
 };
 
@@ -230,6 +231,9 @@ function applyPersonScope(
   }
   if (mappedFields.has("kitchenAddress")) {
     result = replaceLiteralSafely(result, `{{${scopePrefix}.Adresse}}`, person.kitchenAddress);
+  }
+  if (mappedFields.has("phoneNumber")) {
+    result = replaceLiteralSafely(result, `{{${scopePrefix}.Telefonnummer}}`, person.phoneNumber ?? "");
   }
   if (mappedFields.has("coursePreference")) {
     result = replaceLiteralSafely(

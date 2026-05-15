@@ -23,6 +23,7 @@ export interface Person {
   partner?: string; // Name des Partners (früher "group")
   kitchen?: KitchenStatus;
   kitchenAddress: string; // Adresse der Küche
+  phoneNumber: string;
   coursePreference?: CoursePreference;
   /** Explizite Auswahl in Schritt 2 (schlägt Mapping). */
   preferenceManual?: FoodPreference;
@@ -45,6 +46,7 @@ export interface Person {
     intolerances?: string;
     partner?: string;
     kitchenAddress?: string;
+    phoneNumber?: string;
     custom?: Record<string, string>;
   };
 }
@@ -162,6 +164,7 @@ export const COLUMN_FIELDS = {
   partner: "Partner", // Name des Partners
   kitchen: "Küche", // Status: bei mir/bei partner/nicht
   kitchenAddress: "Küchen-Adresse", // Adresse der Küche
+  phoneNumber: "Telefonnummer",
   coursePreference: "Gericht-Präferenz",
 } as const;
 

@@ -162,6 +162,7 @@ function collectTextFieldRaws(persons: Person[]): Set<string> {
     push(p.intolerances);
     push(p.partner);
     push(p.kitchenAddress);
+    push(p.phoneNumber);
     const custom = p.customFieldValues ?? {};
     for (const v of Object.values(custom)) push(v);
   }
