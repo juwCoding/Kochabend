@@ -336,7 +336,7 @@ export function Step5Invitations() {
   const scopeSections = [
     { title: "Person", ids: placeholderGroups.person },
     { title: "Partner", ids: placeholderGroups.partner },
-    { title: "team", ids: placeholderGroups.team },
+    { title: "Team", ids: placeholderGroups.team },
   ] as const;
 
   return (

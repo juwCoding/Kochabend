@@ -18,11 +18,11 @@ const PERSON_FIELD_TOKENS: Record<string, string> = {
 };
 
 const TEAM_PLACEHOLDER_IDS = [
-  "team.Gang",
-  "team.Adresse",
-  "team.Ernährungsform",
-  "team.Unverträglichkeiten",
-  "team.Gäste",
+  "Team.Gang",
+  "Team.Adresse",
+  "Team.Ernährungsform",
+  "Team.Unverträglichkeiten",
+  "Team.Gäste",
 ] as const;
 
 const GASTGEBER_SLOT_SUFFIXES = ["Gang", "Ernährungsform"] as const;
@@ -341,9 +341,9 @@ export function replacePlaceholders(
       ? formatFoodPreferenceLabel(getTeamPreference(cookingTeam, allPersons))
       : "";
 
-    result = replaceLiteralSafely(result, "{{team.Gang}}", distribution.course);
-    result = replaceLiteralSafely(result, "{{team.Adresse}}", distribution.kitchenId);
-    result = replaceLiteralSafely(result, "{{team.Ernährungsform}}", cookingTeamPreference);
+    result = replaceLiteralSafely(result, "{{Team.Gang}}", distribution.course);
+    result = replaceLiteralSafely(result, "{{Team.Adresse}}", distribution.kitchenId);
+    result = replaceLiteralSafely(result, "{{Team.Ernährungsform}}", cookingTeamPreference);
 
     const cookingGuestTeamIds = getDistributionGuestTeamIds(distribution);
     const cookingGuestTeams = cookingGuestTeamIds
@@ -353,7 +353,7 @@ export function replacePlaceholders(
       .map((guestTeam) => getTeamDisplayName(guestTeam, allPersons))
       .filter((name) => name.trim().length > 0)
       .join(", ");
-    result = replaceLiteralSafely(result, "{{team.Gäste}}", kochtGaeste);
+    result = replaceLiteralSafely(result, "{{Team.Gäste}}", kochtGaeste);
 
     const guestPersons = cookingGuestTeams.flatMap((guestTeam) => {
       const guestPerson1 = allPersons.find((p) => p.id === guestTeam.person1Id);
@@ -365,7 +365,7 @@ export function replacePlaceholders(
       .filter((text) => text.length > 0);
     result = replaceLiteralSafely(
       result,
-      "{{team.Unverträglichkeiten}}",
+      "{{Team.Unverträglichkeiten}}",
       intoleranceTexts.length > 0 ? intoleranceTexts.join(", ") : "Keine Unverträglichkeiten"
     );
 
@@ -425,7 +425,7 @@ export function replacePlaceholders(
     }
   } else {
     for (const id of TEAM_PLACEHOLDER_IDS) {
-      const value = id === "team.Unverträglichkeiten" ? "Keine Unverträglichkeiten" : "";
+      const value = id === "Team.Unverträglichkeiten" ? "Keine Unverträglichkeiten" : "";
       result = replaceLiteralSafely(result, `{{${id}}}`, value);
     }
     for (const slot of ["Gastgeber1", "Gastgeber2"] as const) {

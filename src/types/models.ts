@@ -133,7 +133,7 @@ export interface AppState {
   // Schritt 5: Template
   invitationTemplate: string;
   generatedInvitations: Record<string, string>; // Person ID -> generierte Einladung
-  /** Canonical placeholder ids without braces, e.g. "Person.Name", "team.Gang". */
+  /** Canonical placeholder ids without braces, e.g. "Person.Name", "Team.Gang". */
   favoritePlaceholders: string[];
 }
 
