@@ -893,7 +893,7 @@ export function Step2DataCleaning() {
                     {activeMappingField === "kitchen" &&
                       kitchenOptions.map((opt) => (
                         <SelectItem key={opt} value={opt}>
-                          {opt === "kann_gekocht_werden" ? "bei mir" : opt === "partner_kocht" ? "bei partner" : "nicht"}
+                          {formatKitchenLabel(opt)}
                         </SelectItem>
                       ))}
                     {activeMappingField === "preference" &&
@@ -1009,6 +1009,9 @@ export function Step2DataCleaning() {
       {persons.length > 0 && (
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">Daten-Übersicht</h3>
+          <small className="text-xs text-muted-foreground block">
+            Durch Klicken der Spaltenüberschriften kann sortiert werden für eine bessere Übersicht
+          </small>
           <div className="border rounded-md overflow-auto max-h-96">
             <Table>
               <TableHeader>
@@ -1225,11 +1228,7 @@ export function Step2DataCleaning() {
                                 </SelectItem>
                                 {kitchenOptions.map((opt) => (
                                   <SelectItem key={opt} value={opt}>
-                                    {opt === "kann_gekocht_werden"
-                                      ? "bei mir"
-                                      : opt === "partner_kocht"
-                                        ? "bei partner"
-                                        : "nicht"}
+                                    {formatKitchenLabel(opt)}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

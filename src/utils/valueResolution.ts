@@ -96,11 +96,11 @@ export function formatFoodPreferenceLabel(p: string): string {
 export function formatKitchenLabel(k: string): string {
   switch (k as KitchenStatus) {
     case "kann_gekocht_werden":
-      return "bei mir";
+      return "Ja, in meiner Küche geht`s";
     case "partner_kocht":
-      return "bei Partner";
+      return "Mein/e Kochpartner/in hat eine Küche";
     case "kann_nicht_gekocht_werden":
-      return "nicht";
+      return "Nein, ich brauche eine/n Kochpartner/in mit Küche";
     default:
       return k;
   }
