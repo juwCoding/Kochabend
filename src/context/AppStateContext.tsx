@@ -2,8 +2,16 @@ import React, { createContext, useContext, useReducer, useCallback } from "react
 import type { ReactNode } from "react";
 import type { AppState } from "@/types/models";
 import { clampWizardStepIndex } from "@/types/models";
-import { getDefaultAppState, hydrateValueMappingsIfEmpty } from "@/defaultValueMappings";
+import {
+  getDefaultAppState,
+  hydrateValueMappingsIfEmpty,
+} from "@/defaultValueMappings";
 import { normalizeTeamsAndDistribution } from "@/utils/stableTeamId";
+import {
+  CURRENT_STATE_FORMAT_VERSION,
+  migrateAppStateToCurrent,
+  parseStoredEnvelopeVersion,
+} from "@/utils/stateMigrations";
 
 // Action Types
 type AppStateAction =
@@ -20,6 +28,7 @@ type AppStateAction =
   | { type: "SET_DISTRIBUTION"; payload: AppState["distribution"] }
   | { type: "SET_INVITATION_TEMPLATE"; payload: string }
   | { type: "SET_GENERATED_INVITATIONS"; payload: Record<string, string> }
+  | { type: "TOGGLE_FAVORITE_PLACEHOLDER"; payload: string }
   | { type: "LOAD_STATE"; payload: AppState; skipHistory?: boolean }
   | { type: "SET_CURRENT_STEP"; payload: number }
   | { type: "UNDO" }
@@ -35,7 +44,6 @@ interface AppStateWithHistory {
 }
 
 const STORAGE_KEY = "kochabend_state";
-const STATE_FORMAT_VERSION = 1;
 const DATA_PLACEHOLDER = "__KOCHABEND_DATA_PLACEHOLDER__";
 
 interface VersionedStateEnvelope<T> {
@@ -109,7 +117,7 @@ function computeIntegrityHash(input: string): string {
 }
 
 function serializeStateEnvelope<T>(data: T, pretty = false): string {
-  const version = STATE_FORMAT_VERSION;
+  const version = CURRENT_STATE_FORMAT_VERSION;
   const dataJson = JSON.stringify(toJsonCompatible(data), null, pretty ? 2 : 0);
   const hash = computeIntegrityHash(`${dataJson};version=${version}`);
   const template = JSON.stringify(
@@ -344,7 +352,52 @@ function hydrateAppStateShape(base: AppState): AppState {
     step3SortSpecs: validSortSpecs(base.step3SortSpecs),
     teams: normTeams,
     distribution: normDist,
+    favoritePlaceholders: Array.isArray(base.favoritePlaceholders)
+      ? base.favoritePlaceholders
+      : [],
   };
+}
+
+const CUSTOM_FIELD_FAVORITE_SCOPES = [
+  "Person",
+  "Partner",
+  "Gastgeber1.PersonMitKüche",
+  "Gastgeber2.PersonMitKüche",
+] as const;
+
+function customFieldFavoriteIds(fieldName: string): string[] {
+  return CUSTOM_FIELD_FAVORITE_SCOPES.map((scope) => `${scope}.${fieldName}`);
+}
+
+function appendCustomFieldFavorites(favorites: string[], fieldName: string): string[] {
+  const next = [...favorites];
+  for (const id of customFieldFavoriteIds(fieldName)) {
+    if (!next.includes(id)) next.push(id);
+  }
+  return next;
+}
+
+function renameCustomFieldFavorites(
+  favorites: string[],
+  oldName: string,
+  newName: string
+): string[] {
+  return favorites.map((entry) => {
+    for (const scope of CUSTOM_FIELD_FAVORITE_SCOPES) {
+      const oldId = `${scope}.${oldName}`;
+      if (entry === oldId) return `${scope}.${newName}`;
+    }
+    return entry;
+  });
+}
+
+/** Parse ingress only: versioned migrations, then shape hydration (localStorage + import). */
+function ingestAppState(state: AppState, sourceVersion: number): AppState {
+  const withMappings = {
+    ...state,
+    valueMappings: hydrateValueMappingsIfEmpty(state.valueMappings),
+  };
+  return hydrateAppStateShape(migrateAppStateToCurrent(withMappings, sourceVersion));
 }
 
 // Load from localStorage
@@ -352,6 +405,7 @@ const loadStateFromStorage = (): AppStateWithHistory | null => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
+      const sourceVersion = parseStoredEnvelopeVersion(stored);
       const parsedResult = parseImportState<AppStateWithHistory>(stored);
       if (parsedResult.hasEnvelope && !parsedResult.integrityValid) {
         console.error("Failed to load state from localStorage: integrity hash mismatch.");
@@ -364,9 +418,9 @@ const loadStateFromStorage = (): AppStateWithHistory | null => {
 
       const maybeLoaded = loaded as Partial<AppStateWithHistory>;
       const base = maybeLoaded.current || getDefaultAppState();
-      const current = hydrateAppStateShape(base);
+      const current = ingestAppState(base, sourceVersion);
       const historyRaw = maybeLoaded.history || [current];
-      const history = historyRaw.map((h: AppState) => hydrateAppStateShape(h));
+      const history = historyRaw.map((h: AppState) => ingestAppState(h, sourceVersion));
       return {
         current,
         history,
@@ -405,21 +459,48 @@ function appStateReducer(
         hasHeader: action.payload.hasHeader,
       };
       break;
-    case "SET_CUSTOM_FIELDS":
+    case "SET_CUSTOM_FIELDS": {
+      const oldFields = state.current.customFields;
+      let favorites = [...state.current.favoritePlaceholders];
+      for (const [fieldId, newName] of Object.entries(action.payload)) {
+        const oldName = oldFields[fieldId];
+        if (oldName && oldName !== newName) {
+          favorites = renameCustomFieldFavorites(favorites, oldName, newName);
+        }
+      }
       newState = {
         ...state.current,
         customFields: action.payload,
+        favoritePlaceholders: favorites,
       };
       break;
-    case "ADD_CUSTOM_FIELD":
+    }
+    case "ADD_CUSTOM_FIELD": {
+      const favorites = appendCustomFieldFavorites(
+        state.current.favoritePlaceholders,
+        action.payload.fieldName
+      );
       newState = {
         ...state.current,
         customFields: {
           ...state.current.customFields,
           [action.payload.fieldId]: action.payload.fieldName,
         },
+        favoritePlaceholders: favorites,
       };
       break;
+    }
+    case "TOGGLE_FAVORITE_PLACEHOLDER": {
+      const id = action.payload;
+      const favorites = state.current.favoritePlaceholders;
+      newState = {
+        ...state.current,
+        favoritePlaceholders: favorites.includes(id)
+          ? favorites.filter((entry) => entry !== id)
+          : [...favorites, id],
+      };
+      break;
+    }
     case "SET_VALUE_MAPPINGS":
       newState = {
         ...state.current,
@@ -489,6 +570,7 @@ function appStateReducer(
       };
       break;
     case "LOAD_STATE":
+      // Payload must already be ingested (migrate + hydrate) at localStorage/import boundary.
       newState = hydrateAppStateShape(action.payload);
       // If skipHistory is true, don't add to history (used for undo/redo)
       if (action.skipHistory) {
@@ -621,6 +703,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
   const importState = useCallback((json: string, options?: { allowCorrupt?: boolean }) => {
     try {
+      const sourceVersion = parseStoredEnvelopeVersion(json);
       const parsedResult = parseImportState<AppState>(json, options);
       const importedState = parsedResult.state;
 
@@ -630,10 +713,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
 
       dispatch({
         type: "LOAD_STATE",
-        payload: hydrateAppStateShape({
-          ...importedState,
-          valueMappings: hydrateValueMappingsIfEmpty(importedState.valueMappings),
-        }),
+        payload: ingestAppState(importedState, sourceVersion),
         skipHistory: false,
       });
     } catch (error) {

@@ -1,65 +1,130 @@
 import type { Person, Team, Distribution } from "@/types/models";
-import { formatCookSnapshotUnd } from "@/utils/distributionDisplay";
-import { getTeamPreference } from "@/utils/teamDerived";
+import { getTeamPreference, getTeamPersons, hostsAtOwnKitchen } from "@/utils/teamDerived";
 import {
   formatCourseLabel,
   formatFoodPreferenceLabel,
   formatKitchenLabel,
 } from "@/utils/valueResolution";
 
-function replaceTokenSafely(input: string, pattern: RegExp, value: string): string {
-  return input.replace(pattern, () => value);
+const PERSON_FIELD_TOKENS: Record<string, string> = {
+  name: "Name",
+  preference: "Ernährungsform",
+  intolerances: "Unverträglichkeiten",
+  partner: "Partner",
+  kitchen: "Küche",
+  kitchenAddress: "Adresse",
+  coursePreference: "Gericht-Präferenz",
+};
+
+const TEAM_PLACEHOLDER_IDS = [
+  "team.Gang",
+  "team.Adresse",
+  "team.Ernährungsform",
+  "team.Unverträglichkeiten",
+  "team.Gäste",
+] as const;
+
+const GASTGEBER_SLOT_SUFFIXES = ["Gang", "Ernährungsform"] as const;
+
+export interface GastgeberPlaceholderGroup {
+  slot: string[];
+  personMitKueche: string[];
+  personOhneKueche: string[];
+}
+
+export interface PlaceholderGroups {
+  person: string[];
+  partner: string[];
+  team: string[];
+  gastgeber1: GastgeberPlaceholderGroup;
+  gastgeber2: GastgeberPlaceholderGroup;
 }
 
 function replaceLiteralSafely(input: string, token: string, value: string): string {
   return input.split(token).join(value);
 }
 
-// Get all available placeholders from a person and their team/distribution data
-export function getAvailablePlaceholders(
+export function getPersonScopePlaceholderIds(
+  scopePrefix: string,
   columnMapping: Record<string, string>,
   customFields: Record<string, string>
 ): string[] {
   const mappedFields = new Set(Object.values(columnMapping));
-  const placeholders: string[] = [];
-  const addIfMapped = (fieldId: string, placeholder: string) => {
-    if (mappedFields.has(fieldId)) placeholders.push(placeholder);
-  };
+  const ids: string[] = [];
 
-  addIfMapped("name", "Name");
-  addIfMapped("preference", "Ernährungsform");
-  addIfMapped("intolerances", "Unverträglichkeiten");
-  addIfMapped("kitchenAddress", "Adresse");
-  addIfMapped("partner", "Partner");
-  addIfMapped("kitchen", "Küche");
-  addIfMapped("coursePreference", "Gericht-Präferenz");
-
-  // Team-/Verteilungsfelder bleiben verfügbar.
-  placeholders.push(
-    "TeamPartner",
-    "TeamErnährungsform",
-    "KochtGang",
-    "KochtAdresse",
-    "KochtErnährungsform",
-    "KochtUnverträglichkeiten",
-    "KochtGäste",
-    "IsstBei1Team",
-    "IsstBei1Gang",
-    "IsstBei1Adresse",
-    "IsstBei1Ernährungsform",
-    "IsstBei2Team",
-    "IsstBei2Gang",
-    "IsstBei2Adresse",
-    "IsstBei2Ernährungsform"
-  );
+  for (const [fieldId, suffix] of Object.entries(PERSON_FIELD_TOKENS)) {
+    if (mappedFields.has(fieldId)) {
+      ids.push(`${scopePrefix}.${suffix}`);
+    }
+  }
 
   for (const fieldId of mappedFields) {
     if (!fieldId.startsWith("custom_")) continue;
     const fieldName = customFields[fieldId]?.trim();
-    if (fieldName) placeholders.push(fieldName);
+    if (fieldName) ids.push(`${scopePrefix}.${fieldName}`);
   }
 
-  return placeholders;
+  return ids.sort((a, b) => a.localeCompare(b, "de", { sensitivity: "base" }));
+}
+
+function gastgeberSlotIds(slot: "Gastgeber1" | "Gastgeber2"): string[] {
+  return GASTGEBER_SLOT_SUFFIXES.map((suffix) => `${slot}.${suffix}`);
+}
+
+export function getPlaceholderGroups(
+  columnMapping: Record<string, string>,
+  customFields: Record<string, string>
+): PlaceholderGroups {
+  return {
+    person: getPersonScopePlaceholderIds("Person", columnMapping, customFields),
+    partner: getPersonScopePlaceholderIds("Partner", columnMapping, customFields),
+    team: [...TEAM_PLACEHOLDER_IDS],
+    gastgeber1: {
+      slot: gastgeberSlotIds("Gastgeber1"),
+      personMitKueche: getPersonScopePlaceholderIds(
+        "Gastgeber1.PersonMitKüche",
+        columnMapping,
+        customFields
+      ),
+      personOhneKueche: getPersonScopePlaceholderIds(
+        "Gastgeber1.PersonOhneKüche",
+        columnMapping,
+        customFields
+      ),
+    },
+    gastgeber2: {
+      slot: gastgeberSlotIds("Gastgeber2"),
+      personMitKueche: getPersonScopePlaceholderIds(
+        "Gastgeber2.PersonMitKüche",
+        columnMapping,
+        customFields
+      ),
+      personOhneKueche: getPersonScopePlaceholderIds(
+        "Gastgeber2.PersonOhneKüche",
+        columnMapping,
+        customFields
+      ),
+    },
+  };
+}
+
+/** Flat list of all placeholder ids (for pruning favorites, etc.). */
+export function getAllPlaceholderIds(
+  columnMapping: Record<string, string>,
+  customFields: Record<string, string>
+): string[] {
+  const groups = getPlaceholderGroups(columnMapping, customFields);
+  return [
+    ...groups.person,
+    ...groups.partner,
+    ...groups.team,
+    ...groups.gastgeber1.slot,
+    ...groups.gastgeber1.personMitKueche,
+    ...groups.gastgeber1.personOhneKueche,
+    ...groups.gastgeber2.slot,
+    ...groups.gastgeber2.personMitKueche,
+    ...groups.gastgeber2.personOhneKueche,
+  ];
 }
 
 function getDistributionGuestTeamIds(distribution: Distribution): string[] {
@@ -77,7 +142,154 @@ function getTeamDisplayName(team: Team | undefined, allPersons: Person[]): strin
   return p1?.name || p2?.name || "";
 }
 
-// Replace placeholders in template
+function resolvePersonPartnerName(
+  person: Person,
+  team: Team | undefined,
+  allPersons: Person[]
+): string {
+  let partnerName = person.partner || "";
+  if (!partnerName && team) {
+    const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
+    const partner = allPersons.find((p) => p.id === partnerId);
+    partnerName = partner?.name || "";
+  }
+  return partnerName;
+}
+
+export function resolveHostTeamPersons(
+  hostTeam: Team | undefined,
+  kitchenId: string,
+  allPersons: Person[]
+): { mitKueche?: Person; ohneKueche?: Person } {
+  if (!hostTeam) return {};
+  const { person1, person2 } = getTeamPersons(hostTeam, allPersons);
+  const normKitchen = kitchenId.trim();
+  const candidates = [person1, person2].filter((p): p is Person => Boolean(p));
+
+  let mitKueche = candidates.find(
+    (p) =>
+      hostsAtOwnKitchen(p.kitchen) &&
+      (p.kitchenAddress?.trim() ?? "") === normKitchen &&
+      normKitchen.length > 0
+  );
+
+  if (!mitKueche && candidates.length === 1) {
+    mitKueche = candidates[0];
+  }
+
+  const ohneKueche = candidates.find((p) => p.id !== mitKueche?.id);
+  return { mitKueche, ohneKueche };
+}
+
+function applyPersonScope(
+  result: string,
+  scopePrefix: string,
+  person: Person | undefined,
+  team: Team | undefined,
+  allPersons: Person[],
+  customFields: Record<string, string>,
+  columnMapping: Record<string, string>
+): string {
+  const empty = "";
+  if (!person) {
+    for (const id of getPersonScopePlaceholderIds(scopePrefix, columnMapping, customFields)) {
+      result = replaceLiteralSafely(result, `{{${id}}}`, empty);
+    }
+    return result;
+  }
+
+  const mappedFields = new Set(Object.values(columnMapping));
+  const partnerName = resolvePersonPartnerName(person, team, allPersons);
+
+  if (mappedFields.has("name")) {
+    result = replaceLiteralSafely(result, `{{${scopePrefix}.Name}}`, person.name);
+  }
+  if (mappedFields.has("preference")) {
+    result = replaceLiteralSafely(
+      result,
+      `{{${scopePrefix}.Ernährungsform}}`,
+      formatFoodPreferenceLabel(person.preference ?? "")
+    );
+  }
+  if (mappedFields.has("intolerances")) {
+    result = replaceLiteralSafely(
+      result,
+      `{{${scopePrefix}.Unverträglichkeiten}}`,
+      person.intolerances || ""
+    );
+  }
+  if (mappedFields.has("partner")) {
+    result = replaceLiteralSafely(result, `{{${scopePrefix}.Partner}}`, partnerName);
+  }
+  if (mappedFields.has("kitchen")) {
+    result = replaceLiteralSafely(
+      result,
+      `{{${scopePrefix}.Küche}}`,
+      formatKitchenLabel(person.kitchen ?? "")
+    );
+  }
+  if (mappedFields.has("kitchenAddress")) {
+    result = replaceLiteralSafely(result, `{{${scopePrefix}.Adresse}}`, person.kitchenAddress);
+  }
+  if (mappedFields.has("coursePreference")) {
+    result = replaceLiteralSafely(
+      result,
+      `{{${scopePrefix}.Gericht-Präferenz}}`,
+      formatCourseLabel(person.coursePreference || "")
+    );
+  }
+
+  for (const fieldId of mappedFields) {
+    if (!fieldId.startsWith("custom_")) continue;
+    const fieldName = customFields[fieldId]?.trim();
+    if (!fieldName) continue;
+    const value = person.customFieldValues?.[fieldId] ?? "";
+    result = replaceLiteralSafely(result, `{{${scopePrefix}.${fieldName}}}`, value);
+  }
+
+  return result;
+}
+
+function applyGastgeberSlot(
+  result: string,
+  slot: "Gastgeber1" | "Gastgeber2",
+  hostVisit: Distribution | undefined,
+  allTeams: Team[],
+  allPersons: Person[]
+): string {
+  const empty = "";
+  if (!hostVisit) {
+    for (const suffix of GASTGEBER_SLOT_SUFFIXES) {
+      result = replaceLiteralSafely(result, `{{${slot}.${suffix}}}`, empty);
+    }
+    return result;
+  }
+
+  const hostTeam = allTeams.find((t) => t.id === hostVisit.cookTeamId);
+  const hostTeamPreference = hostTeam
+    ? formatFoodPreferenceLabel(getTeamPreference(hostTeam, allPersons))
+    : "";
+
+  result = replaceLiteralSafely(result, `{{${slot}.Gang}}`, hostVisit.course);
+  result = replaceLiteralSafely(result, `{{${slot}.Ernährungsform}}`, hostTeamPreference);
+
+  return result;
+}
+
+function getHostVisits(
+  cookTeamId: string,
+  allDistributions: Distribution[]
+): Distribution[] {
+  const courseOrder: Record<Distribution["course"], number> = {
+    Vorspeise: 0,
+    Hauptgang: 1,
+    Nachspeise: 2,
+  };
+  return allDistributions
+    .filter((d) => getDistributionGuestTeamIds(d).includes(cookTeamId))
+    .sort((a, b) => courseOrder[a.course] - courseOrder[b.course]);
+}
+
 export function replacePlaceholders(
   template: string,
   person: Person,
@@ -91,51 +303,44 @@ export function replacePlaceholders(
 ): string {
   let result = template;
 
-  // Basic person fields
-  result = replaceTokenSafely(result, /\{\{Name\}\}/g, person.name);
-  result = replaceTokenSafely(result, /\{\{Ernährungsform\}\}/g, formatFoodPreferenceLabel(person.preference ?? ""));
-  result = replaceTokenSafely(result, /\{\{Präferenz\}\}/g, formatFoodPreferenceLabel(person.preference ?? "")); // Rückwärtskompatibilität
-  result = replaceTokenSafely(result, /\{\{Unverträglichkeiten\}\}/g, person.intolerances || "");
-  result = replaceTokenSafely(result, /\{\{Adresse\}\}/g, person.kitchenAddress);
-  // Partner: aus Team oder person.partner
-  let partnerName = person.partner || "";
-  if (!partnerName && team) {
-    const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
-    const partner = allPersons.find((p) => p.id === partnerId);
-    partnerName = partner?.name || "";
-  }
-  result = replaceTokenSafely(result, /\{\{Gruppe\}\}/g, partnerName); // Rückwärtskompatibilität
-  result = replaceTokenSafely(result, /\{\{Partner\}\}/g, partnerName);
-  result = replaceTokenSafely(result, /\{\{Küche\}\}/g, formatKitchenLabel(person.kitchen ?? ""));
-  result = replaceTokenSafely(result, /\{\{Gericht-Präferenz\}\}/g, formatCourseLabel(person.coursePreference || ""));
+  const partnerId = team
+    ? team.person1Id === person.id
+      ? team.person2Id
+      : team.person1Id
+    : undefined;
+  const partnerPerson = partnerId
+    ? allPersons.find((p) => p.id === partnerId)
+    : undefined;
 
-  // Team fields
-  if (team) {
-    const partnerId = team.person1Id === person.id ? team.person2Id : team.person1Id;
-    const partner = allPersons.find((p) => p.id === partnerId);
-    const teamPreference = getTeamPreference(team, allPersons);
-    
-    result = replaceTokenSafely(result, /\{\{TeamPartner\}\}/g, partner?.name || "");
-    result = replaceTokenSafely(result, /\{\{TeamErnährungsform\}\}/g, formatFoodPreferenceLabel(teamPreference));
-    // Rückwärtskompatibilität
-    result = replaceTokenSafely(result, /\{\{TeamPräferenz\}\}/g, formatFoodPreferenceLabel(teamPreference));
-  } else {
-    result = replaceTokenSafely(result, /\{\{TeamPartner\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{TeamErnährungsform\}\}/g, "");
-    // Rückwärtskompatibilität
-    result = replaceTokenSafely(result, /\{\{TeamPräferenz\}\}/g, "");
-  }
+  result = applyPersonScope(
+    result,
+    "Person",
+    person,
+    team,
+    allPersons,
+    customFields,
+    columnMapping
+  );
+  result = applyPersonScope(
+    result,
+    "Partner",
+    partnerPerson,
+    team,
+    allPersons,
+    customFields,
+    columnMapping
+  );
 
-  // Distribution fields
   if (distribution) {
     const cookingTeam = allTeams.find((t) => t.id === distribution.cookTeamId);
     const cookingTeamPreference = cookingTeam
       ? formatFoodPreferenceLabel(getTeamPreference(cookingTeam, allPersons))
       : "";
 
-    result = replaceTokenSafely(result, /\{\{KochtGang\}\}/g, distribution.course);
-    result = replaceTokenSafely(result, /\{\{KochtAdresse\}\}/g, distribution.kitchenId);
-    result = replaceTokenSafely(result, /\{\{KochtErnährungsform\}\}/g, cookingTeamPreference);
+    result = replaceLiteralSafely(result, "{{team.Gang}}", distribution.course);
+    result = replaceLiteralSafely(result, "{{team.Adresse}}", distribution.kitchenId);
+    result = replaceLiteralSafely(result, "{{team.Ernährungsform}}", cookingTeamPreference);
+
     const cookingGuestTeamIds = getDistributionGuestTeamIds(distribution);
     const cookingGuestTeams = cookingGuestTeamIds
       .map((teamId) => allTeams.find((t) => t.id === teamId))
@@ -144,143 +349,107 @@ export function replacePlaceholders(
       .map((guestTeam) => getTeamDisplayName(guestTeam, allPersons))
       .filter((name) => name.trim().length > 0)
       .join(", ");
-    result = replaceTokenSafely(result, /\{\{KochtGäste\}\}/g, kochtGaeste);
+    result = replaceLiteralSafely(result, "{{team.Gäste}}", kochtGaeste);
 
     const guestPersons = cookingGuestTeams.flatMap((guestTeam) => {
       const guestPerson1 = allPersons.find((p) => p.id === guestTeam.person1Id);
       const guestPerson2 = allPersons.find((p) => p.id === guestTeam.person2Id);
       return [guestPerson1, guestPerson2].filter((entry): entry is Person => Boolean(entry));
     });
-    const intoleranceEntries = guestPersons
-      .map((guest) => ({ name: guest.name, intolerance: guest.intolerances?.trim() || "" }))
-      .filter((entry) => entry.intolerance.length > 0)
-      .map((entry) => `${entry.intolerance} (${entry.name})`);
-    result = replaceTokenSafely(
+    const intoleranceTexts = guestPersons
+      .map((guest) => guest.intolerances?.trim() || "")
+      .filter((text) => text.length > 0);
+    result = replaceLiteralSafely(
       result,
-      /\{\{KochtUnverträglichkeiten\}\}/g,
-      intoleranceEntries.length > 0 ? intoleranceEntries.join(", ") : "Keine Unverträglichkeiten"
+      "{{team.Unverträglichkeiten}}",
+      intoleranceTexts.length > 0 ? intoleranceTexts.join(", ") : "Keine Unverträglichkeiten"
     );
-    // Rückwärtskompatibilität
-    result = replaceTokenSafely(result, /\{\{KochtKüche\}\}/g, distribution.kitchenId);
 
-    const courseOrder: Record<Distribution["course"], number> = {
-      Vorspeise: 0,
-      Hauptgang: 1,
-      Nachspeise: 2,
-    };
-    const hostVisits = allDistributions
-      .filter((d) => {
-        const guestTeamIds = Array.isArray(d.guestTeamIds)
-          ? d.guestTeamIds
-          : [d.guestTeam1Id, d.guestTeam2Id].filter(
-              (id): id is string => typeof id === "string" && id.length > 0
-            );
-        return guestTeamIds.includes(distribution.cookTeamId);
-      })
-      .sort((a, b) => courseOrder[a.course] - courseOrder[b.course]);
+    const hostVisits = getHostVisits(distribution.cookTeamId, allDistributions);
+    const hostSlots: Array<["Gastgeber1" | "Gastgeber2", Distribution | undefined]> = [
+      ["Gastgeber1", hostVisits[0]],
+      ["Gastgeber2", hostVisits[1]],
+    ];
 
-    const host1 = hostVisits[0];
-    if (host1) {
-      const hostTeam1 = allTeams.find((t) => t.id === host1.cookTeamId);
-      const hostPerson1_1 = hostTeam1
-        ? allPersons.find((p) => p.id === hostTeam1.person1Id)
-        : null;
-      const hostPerson1_2 = hostTeam1
-        ? allPersons.find((p) => p.id === hostTeam1.person2Id)
-        : null;
-      let hostNames1 =
-        hostPerson1_1 && hostPerson1_2
-          ? `${hostPerson1_1.name} und ${hostPerson1_2.name}`
-          : "";
-      if (!hostNames1) {
-        const fromSnap = formatCookSnapshotUnd(host1);
-        if (fromSnap) hostNames1 = fromSnap;
+    for (const [slot, hostVisit] of hostSlots) {
+      result = applyGastgeberSlot(result, slot, hostVisit, allTeams, allPersons);
+      if (hostVisit) {
+        const hostTeam = allTeams.find((t) => t.id === hostVisit.cookTeamId);
+        const { mitKueche, ohneKueche } = resolveHostTeamPersons(
+          hostTeam,
+          hostVisit.kitchenId,
+          allPersons
+        );
+        result = applyPersonScope(
+          result,
+          `${slot}.PersonMitKüche`,
+          mitKueche,
+          hostTeam,
+          allPersons,
+          customFields,
+          columnMapping
+        );
+        result = applyPersonScope(
+          result,
+          `${slot}.PersonOhneKüche`,
+          ohneKueche,
+          hostTeam,
+          allPersons,
+          customFields,
+          columnMapping
+        );
+      } else {
+        result = applyPersonScope(
+          result,
+          `${slot}.PersonMitKüche`,
+          undefined,
+          undefined,
+          allPersons,
+          customFields,
+          columnMapping
+        );
+        result = applyPersonScope(
+          result,
+          `${slot}.PersonOhneKüche`,
+          undefined,
+          undefined,
+          allPersons,
+          customFields,
+          columnMapping
+        );
       }
-      const hostTeamPreference1 = hostTeam1
-        ? formatFoodPreferenceLabel(getTeamPreference(hostTeam1, allPersons))
-        : "";
-      result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, hostNames1);
-      result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, host1.course);
-      result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, host1.kitchenId);
-      result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, hostTeamPreference1);
-      // Rückwärtskompatibilität
-      result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, hostNames1);
-    } else {
-      result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, "");
-      // Rückwärtskompatibilität
-      result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, "");
-    }
-
-    const host2 = hostVisits[1];
-    if (host2) {
-      const hostTeam2 = allTeams.find((t) => t.id === host2.cookTeamId);
-      const hostPerson2_1 = hostTeam2
-        ? allPersons.find((p) => p.id === hostTeam2.person1Id)
-        : null;
-      const hostPerson2_2 = hostTeam2
-        ? allPersons.find((p) => p.id === hostTeam2.person2Id)
-        : null;
-      let hostNames2 =
-        hostPerson2_1 && hostPerson2_2
-          ? `${hostPerson2_1.name} und ${hostPerson2_2.name}`
-          : "";
-      if (!hostNames2) {
-        const fromSnap = formatCookSnapshotUnd(host2);
-        if (fromSnap) hostNames2 = fromSnap;
-      }
-      const hostTeamPreference2 = hostTeam2
-        ? formatFoodPreferenceLabel(getTeamPreference(hostTeam2, allPersons))
-        : "";
-      result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, hostNames2);
-      result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, host2.course);
-      result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, host2.kitchenId);
-      result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, hostTeamPreference2);
-      // Rückwärtskompatibilität
-      result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, hostNames2);
-    } else {
-      result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, "");
-      result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, "");
-      // Rückwärtskompatibilität
-      result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, "");
     }
   } else {
-    result = replaceTokenSafely(result, /\{\{KochtGang\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{KochtAdresse\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{KochtErnährungsform\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{KochtUnverträglichkeiten\}\}/g, "Keine Unverträglichkeiten");
-    result = replaceTokenSafely(result, /\{\{KochtGäste\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei1Team\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{KochtKüche\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei1Gang\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei1Adresse\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei1Ernährungsform\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei2Team\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei2Gang\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei2Adresse\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei2Ernährungsform\}\}/g, "");
-    // Rückwärtskompatibilität
-    result = replaceTokenSafely(result, /\{\{IsstBei1\}\}/g, "");
-    result = replaceTokenSafely(result, /\{\{IsstBei2\}\}/g, "");
-  }
-
-  const mappedFields = new Set(Object.values(columnMapping));
-  for (const fieldId of mappedFields) {
-    if (!fieldId.startsWith("custom_")) continue;
-    const fieldName = customFields[fieldId]?.trim();
-    if (!fieldName) continue;
-    const value = person.customFieldValues?.[fieldId] ?? "";
-    result = replaceLiteralSafely(result, `{{${fieldName}}}`, value);
+    for (const id of TEAM_PLACEHOLDER_IDS) {
+      const value = id === "team.Unverträglichkeiten" ? "Keine Unverträglichkeiten" : "";
+      result = replaceLiteralSafely(result, `{{${id}}}`, value);
+    }
+    for (const slot of ["Gastgeber1", "Gastgeber2"] as const) {
+      result = applyGastgeberSlot(result, slot, undefined, allTeams, allPersons);
+      result = applyPersonScope(
+        result,
+        `${slot}.PersonMitKüche`,
+        undefined,
+        undefined,
+        allPersons,
+        customFields,
+        columnMapping
+      );
+      result = applyPersonScope(
+        result,
+        `${slot}.PersonOhneKüche`,
+        undefined,
+        undefined,
+        allPersons,
+        customFields,
+        columnMapping
+      );
+    }
   }
 
   return result;
 }
 
-// Generate all invitations
 export function generateAllInvitations(
   template: string,
   persons: Person[],
@@ -313,4 +482,3 @@ export function generateAllInvitations(
 
   return invitations;
 }
-

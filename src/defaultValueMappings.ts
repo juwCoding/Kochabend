@@ -40,11 +40,29 @@ export const DEFAULT_VALUE_MAPPINGS: ValueMapping[] = [
   { field: "coursePreference", rawValue: "dessert", mappedValue: "Nachspeise", isDefault: true },
 ];
 
+/** Default favorite placeholder ids (v2). */
+export const DEFAULT_FAVORITE_PLACEHOLDERS: readonly string[] = [
+  "Person.Name",
+  "team.Unverträglichkeiten",
+  "team.Adresse",
+  "team.Gang",
+  "team.Ernährungsform",
+  "team.Gäste",
+  "Partner.Name",
+  "Gastgeber1.Gang",
+  "Gastgeber1.PersonMitKüche.Adresse",
+  "Gastgeber1.PersonMitKüche.Name",
+  "Gastgeber2.Gang",
+  "Gastgeber2.PersonMitKüche.Adresse",
+  "Gastgeber2.PersonMitKüche.Name",
+];
+
 /** Vollständiger App-Startzustand inkl. Standard-Mappings. */
 export function getDefaultAppState(): AppState {
   return {
     ...initialAppState,
     valueMappings: [...DEFAULT_VALUE_MAPPINGS],
+    favoritePlaceholders: [...DEFAULT_FAVORITE_PLACEHOLDERS],
   };
 }
 

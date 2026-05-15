@@ -131,6 +131,8 @@ export interface AppState {
   // Schritt 5: Template
   invitationTemplate: string;
   generatedInvitations: Record<string, string>; // Person ID -> generierte Einladung
+  /** Canonical placeholder ids without braces, e.g. "Person.Name", "team.Gang". */
+  favoritePlaceholders: string[];
 }
 
 // Initialer State (ohne Standard-Wert-Mappings — vollständig: getDefaultAppState() in defaultValueMappings.ts)
@@ -149,6 +151,7 @@ export const initialAppState: AppState = {
   distribution: [],
   invitationTemplate: "",
   generatedInvitations: {},
+  favoritePlaceholders: [],
 };
 
 // Spalten-Mapping Optionen

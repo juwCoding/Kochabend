@@ -2,11 +2,16 @@ import { useState, useMemo } from "react";
 import { useAppState } from "@/context/AppStateContext";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { getAvailablePlaceholders, generateAllInvitations, replacePlaceholders } from "@/utils/templateEngine";
+import {
+  getPlaceholderGroups,
+  generateAllInvitations,
+  replacePlaceholders,
+  type GastgeberPlaceholderGroup,
+} from "@/utils/templateEngine";
 import { downloadTeamInvitationsPdf } from "@/utils/invitationPdf";
-import { FileText, Download, FileDown } from "lucide-react";
+import { FileText, Download, FileDown, Star } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-// Textarea component
 function Textarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea
@@ -22,71 +27,173 @@ function sanitizeDownloadFilePart(value: string): string {
   return safe.length > 0 ? safe : "person";
 }
 
+function PlaceholderRow({
+  placeholderId,
+  isFavorite,
+  showStar,
+  onInsert,
+  onToggleFavorite,
+}: {
+  placeholderId: string;
+  isFavorite: boolean;
+  showStar: boolean;
+  onInsert: () => void;
+  onToggleFavorite: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={onInsert}
+        className="min-w-0 flex-1 justify-start truncate"
+        title={placeholderId}
+      >
+        {`{{${placeholderId}}}`}
+      </Button>
+      {showStar && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-8 w-8 shrink-0 px-0"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite();
+          }}
+          aria-label={isFavorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+        >
+          <Star
+            className={cn(
+              "h-4 w-4",
+              isFavorite ? "fill-amber-400 text-amber-500" : "text-muted-foreground"
+            )}
+          />
+        </Button>
+      )}
+    </div>
+  );
+}
+
+function PlaceholderGrid({
+  ids,
+  favoritesOnly,
+  favoriteSet,
+  showStars,
+  onInsert,
+  onToggleFavorite,
+}: {
+  ids: string[];
+  favoritesOnly: boolean;
+  favoriteSet: Set<string>;
+  showStars: boolean;
+  onInsert: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
+}) {
+  const visible = favoritesOnly ? ids.filter((id) => favoriteSet.has(id)) : ids;
+  if (visible.length === 0) return null;
+
+  return (
+    <div className="grid grid-cols-1 gap-1">
+      {visible.map((id) => (
+        <PlaceholderRow
+          key={id}
+          placeholderId={id}
+          isFavorite={favoriteSet.has(id)}
+          showStar={showStars}
+          onInsert={() => onInsert(id)}
+          onToggleFavorite={() => onToggleFavorite(id)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function GastgeberSection({
+  title,
+  group,
+  favoritesOnly,
+  favoriteSet,
+  showStars,
+  onInsert,
+  onToggleFavorite,
+}: {
+  title: string;
+  group: GastgeberPlaceholderGroup;
+  favoritesOnly: boolean;
+  favoriteSet: Set<string>;
+  showStars: boolean;
+  onInsert: (id: string) => void;
+  onToggleFavorite: (id: string) => void;
+}) {
+  const hasSlot = group.slot.some((id) => !favoritesOnly || favoriteSet.has(id));
+  const hasMit = group.personMitKueche.some((id) => !favoritesOnly || favoriteSet.has(id));
+  const hasOhne = group.personOhneKueche.some((id) => !favoritesOnly || favoriteSet.has(id));
+
+  if (!hasSlot && !hasMit && !hasOhne) return null;
+
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      {hasSlot && (
+        <div className="space-y-1">
+          <PlaceholderGrid
+            ids={group.slot}
+            favoritesOnly={favoritesOnly}
+            favoriteSet={favoriteSet}
+            showStars={showStars}
+            onInsert={onInsert}
+            onToggleFavorite={onToggleFavorite}
+          />
+        </div>
+      )}
+      {hasMit && (
+        <div className="space-y-1">
+          <p className="text-[11px] text-muted-foreground">PersonMitKüche</p>
+          <PlaceholderGrid
+            ids={group.personMitKueche}
+            favoritesOnly={favoritesOnly}
+            favoriteSet={favoriteSet}
+            showStars={showStars}
+            onInsert={onInsert}
+            onToggleFavorite={onToggleFavorite}
+          />
+        </div>
+      )}
+      {hasOhne && (
+        <div className="space-y-1">
+          <p className="text-[11px] text-muted-foreground">PersonOhneKüche</p>
+          <PlaceholderGrid
+            ids={group.personOhneKueche}
+            favoritesOnly={favoritesOnly}
+            favoriteSet={favoriteSet}
+            showStars={showStars}
+            onInsert={onInsert}
+            onToggleFavorite={onToggleFavorite}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Step5Invitations() {
   const { state, dispatch } = useAppState();
   const [template, setTemplate] = useState(state.invitationTemplate || "");
   const [previewPersonId, setPreviewPersonId] = useState<string>("");
-  const [generatedInvitations, setGeneratedInvitations] = useState<Record<string, string>>(state.generatedInvitations);
-
-  const availablePlaceholders = getAvailablePlaceholders(
-    state.columnMapping,
-    state.customFields
+  const [generatedInvitations, setGeneratedInvitations] = useState<Record<string, string>>(
+    state.generatedInvitations
   );
-  const customPlaceholderNames = useMemo(
-    () =>
-      Object.values(state.columnMapping)
-        .filter((fieldId) => fieldId.startsWith("custom_"))
-        .map((fieldId) => state.customFields[fieldId]?.trim())
-        .filter((name): name is string => Boolean(name)),
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+
+  const placeholderGroups = useMemo(
+    () => getPlaceholderGroups(state.columnMapping, state.customFields),
     [state.columnMapping, state.customFields]
   );
-  const customPlaceholderSet = useMemo(() => new Set(customPlaceholderNames), [customPlaceholderNames]);
-  const predefinedFieldPlaceholders = useMemo(() => {
-    const mappedFields = new Set(Object.values(state.columnMapping));
-    const entries: Array<[string, string]> = [
-      ["name", "Name"],
-      ["preference", "Ernährungsform"],
-      ["intolerances", "Unverträglichkeiten"],
-      ["partner", "Partner"],
-      ["kitchen", "Küche"],
-      ["kitchenAddress", "Adresse"],
-      ["coursePreference", "Gericht-Präferenz"],
-    ];
-    return entries
-      .filter(([fieldId]) => mappedFields.has(fieldId))
-      .map(([, placeholder]) => placeholder);
-  }, [state.columnMapping]);
-  const teamPlaceholders = ["TeamPartner", "TeamErnährungsform"];
-  const distributionPlaceholders = [
-    "KochtGang",
-    "KochtAdresse",
-    "KochtErnährungsform",
-    "KochtUnverträglichkeiten",
-    "KochtGäste",
-    "IsstBei1Team",
-    "IsstBei1Gang",
-    "IsstBei1Adresse",
-    "IsstBei1Ernährungsform",
-    "IsstBei2Team",
-    "IsstBei2Gang",
-    "IsstBei2Adresse",
-    "IsstBei2Ernährungsform",
-  ];
-  const predefinedPlaceholders = useMemo(
-    () => predefinedFieldPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
-    [predefinedFieldPlaceholders, availablePlaceholders]
-  );
-  const freePlaceholders = useMemo(
-    () => availablePlaceholders.filter((placeholder) => customPlaceholderSet.has(placeholder)),
-    [availablePlaceholders, customPlaceholderSet]
-  );
-  const groupedTeamPlaceholders = useMemo(
-    () => teamPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
-    [availablePlaceholders]
-  );
-  const groupedDistributionPlaceholders = useMemo(
-    () => distributionPlaceholders.filter((placeholder) => availablePlaceholders.includes(placeholder)),
-    [availablePlaceholders]
+
+  const favoriteSet = useMemo(
+    () => new Set(state.favoritePlaceholders),
+    [state.favoritePlaceholders]
   );
 
   const previewPerson = useMemo(() => {
@@ -98,6 +205,7 @@ export function Step5Invitations() {
     () => [...state.persons].sort((a, b) => a.name.localeCompare(b.name, "de", { sensitivity: "base" })),
     [state.persons]
   );
+
   const personsWithoutDistribution = useMemo(() => {
     return [...state.persons]
       .filter((person) => {
@@ -112,7 +220,7 @@ export function Step5Invitations() {
 
   const previewText = useMemo(() => {
     if (!previewPerson) return "";
-    
+
     const team = state.teams.find(
       (t) => t.person1Id === previewPerson.id || t.person2Id === previewPerson.id
     );
@@ -200,26 +308,36 @@ export function Step5Invitations() {
     );
   };
 
-  const insertPlaceholder = (placeholder: string) => {
-    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+  const insertPlaceholder = (placeholderId: string) => {
+    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
     if (textarea) {
       const start = textarea.selectionStart;
       const end = textarea.selectionEnd;
-      const text = template;
-      const before = text.substring(0, start);
-      const after = text.substring(end);
-      const newText = `${before}{{${placeholder}}}${after}`;
-      handleTemplateChange(newText);
-      
-      // Restore cursor position
+      const before = template.substring(0, start);
+      const after = template.substring(end);
+      const token = `{{${placeholderId}}}`;
+      handleTemplateChange(`${before}${token}${after}`);
+
       setTimeout(() => {
         textarea.focus();
-        textarea.setSelectionRange(start + placeholder.length + 4, start + placeholder.length + 4);
+        textarea.setSelectionRange(start + token.length, start + token.length);
       }, 0);
     } else {
-      handleTemplateChange(template + `{{${placeholder}}}`);
+      handleTemplateChange(template + `{{${placeholderId}}}`);
     }
   };
+
+  const toggleFavorite = (placeholderId: string) => {
+    dispatch({ type: "TOGGLE_FAVORITE_PLACEHOLDER", payload: placeholderId });
+  };
+
+  const showStars = !favoritesOnly;
+
+  const scopeSections = [
+    { title: "Person", ids: placeholderGroups.person },
+    { title: "Partner", ids: placeholderGroups.partner },
+    { title: "team", ids: placeholderGroups.team },
+  ] as const;
 
   return (
     <div className="space-y-6">
@@ -243,77 +361,57 @@ export function Step5Invitations() {
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold mb-2">Verfügbare Platzhalter</h3>
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">vordefinierte Felder</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {predefinedPlaceholders.map((placeholder) => (
-                    <Button
-                      key={placeholder}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => insertPlaceholder(placeholder)}
-                      className="justify-start"
-                    >
-                      {`{{${placeholder}}}`}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              {freePlaceholders.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Freifelder</p>
-                  <div className="grid grid-cols-2 gap-2">
-                    {freePlaceholders.map((placeholder) => (
-                      <Button
-                        key={placeholder}
-                        variant="outline"
-                        size="sm"
-                        onClick={() => insertPlaceholder(placeholder)}
-                        className="justify-start"
-                      >
-                        {`{{${placeholder}}}`}
-                      </Button>
-                    ))}
+            <div className="mb-2 flex items-center justify-between gap-4">
+              <h3 className="text-lg font-semibold">Verfügbare Platzhalter</h3>
+              <label className="flex shrink-0 cursor-pointer items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={favoritesOnly}
+                  onChange={(e) => setFavoritesOnly(e.target.checked)}
+                  className="h-4 w-4 rounded border-input"
+                />
+                Nur Favoriten
+              </label>
+            </div>
+            <div className="space-y-4 max-h-[420px] overflow-y-auto pr-1">
+              {scopeSections.map(({ title, ids }) => {
+                const visible = favoritesOnly ? ids.filter((id) => favoriteSet.has(id)) : ids;
+                if (visible.length === 0) return null;
+                return (
+                  <div key={title} className="space-y-2">
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      {title}
+                    </p>
+                    <PlaceholderGrid
+                      ids={ids}
+                      favoritesOnly={favoritesOnly}
+                      favoriteSet={favoriteSet}
+                      showStars={showStars}
+                      onInsert={insertPlaceholder}
+                      onToggleFavorite={toggleFavorite}
+                    />
                   </div>
-                </div>
-              )}
+                );
+              })}
 
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Team</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {groupedTeamPlaceholders.map((placeholder) => (
-                    <Button
-                      key={placeholder}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => insertPlaceholder(placeholder)}
-                      className="justify-start"
-                    >
-                      {`{{${placeholder}}}`}
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Verteilung</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {groupedDistributionPlaceholders.map((placeholder) => (
-                    <Button
-                      key={placeholder}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => insertPlaceholder(placeholder)}
-                      className="justify-start"
-                    >
-                      {`{{${placeholder}}}`}
-                    </Button>
-                  ))}
-                </div>
-              </div>
+              <GastgeberSection
+                title="Gastgeber 1"
+                group={placeholderGroups.gastgeber1}
+                favoritesOnly={favoritesOnly}
+                favoriteSet={favoriteSet}
+                showStars={showStars}
+                onInsert={insertPlaceholder}
+                onToggleFavorite={toggleFavorite}
+              />
+              <GastgeberSection
+                title="Gastgeber 2"
+                group={placeholderGroups.gastgeber2}
+                favoritesOnly={favoritesOnly}
+                favoriteSet={favoriteSet}
+                showStars={showStars}
+                onInsert={insertPlaceholder}
+                onToggleFavorite={toggleFavorite}
+              />
             </div>
           </div>
 
@@ -369,7 +467,7 @@ export function Step5Invitations() {
 
           {Object.keys(generatedInvitations).length === 0 ? (
             <div className="p-4 border rounded-md text-center text-muted-foreground">
-              Klicken Sie auf "Alle Einladungen generieren", um die Einladungen zu erstellen.
+              Klicken Sie auf &quot;Alle Einladungen generieren&quot;, um die Einladungen zu erstellen.
             </div>
           ) : (
             <div className="space-y-2 max-h-[600px] overflow-auto">
@@ -387,9 +485,7 @@ export function Step5Invitations() {
                         <Download className="h-4 w-4" />
                       </Button>
                     </div>
-                    <div className="text-sm whitespace-pre-wrap text-muted-foreground">
-                      {invitation}
-                    </div>
+                    <p className="text-sm whitespace-pre-wrap text-muted-foreground">{invitation}</p>
                   </div>
                 );
               })}
@@ -411,4 +507,3 @@ export function Step5Invitations() {
     </div>
   );
 }
-
