@@ -27,6 +27,7 @@ export const DEFAULT_VALUE_MAPPINGS: ValueMapping[] = [
 
   // Gericht-Präferenz — kanonische Literale
   { field: "coursePreference", rawValue: "keine", mappedValue: "keine", isDefault: true },
+  { field: "coursePreference", rawValue: "", mappedValue: "keine", isDefault: true },
   { field: "coursePreference", rawValue: "Vorspeise", mappedValue: "Vorspeise", isDefault: true },
   { field: "coursePreference", rawValue: "Hauptspeise", mappedValue: "Hauptspeise", isDefault: true },
   { field: "coursePreference", rawValue: "Hauptgang", mappedValue: "Hauptspeise", isDefault: true },
