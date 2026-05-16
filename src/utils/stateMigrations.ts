@@ -1,12 +1,72 @@
-import type { AppState, Course, CoursePreference } from "@/types/models";
+import type { AppState, Course, CoursePreference, Person } from "@/types/models";
 import { DEFAULT_FAVORITE_PLACEHOLDERS } from "@/defaultValueMappings";
 import { generateAllInvitations } from "@/utils/templateEngine";
 
-export const CURRENT_STATE_FORMAT_VERSION = 2;
+export const CURRENT_STATE_FORMAT_VERSION = 3;
 
 const migrations: Record<number, (state: AppState) => AppState> = {
   1: migrateV1ToV2,
+  2: migrateV2ToV3,
 };
+
+/** Spaltenindex der in Schritt 1 zugeordneten Telefonnummer-Spalte, sonst -1. */
+export function findPhoneNumberColumnIndex(columnMapping: Record<string, string>): number {
+  const entry = Object.entries(columnMapping).find(([, field]) => field === "phoneNumber");
+  if (!entry) return -1;
+  const index = parseInt(entry[0].replace("column_", ""), 10);
+  return Number.isFinite(index) ? index : -1;
+}
+
+/** Rohwert aus Schritt-1-CSV (columnMapping + csvData) für eine Zeile. */
+export function readPhoneNumberFromCsv(
+  csvData: string[][],
+  rowIndex: number,
+  columnMapping: Record<string, string>
+): string {
+  const columnIndex = findPhoneNumberColumnIndex(columnMapping);
+  if (columnIndex < 0) return "";
+  const row = csvData[rowIndex];
+  if (!row || columnIndex >= row.length) return "";
+  return row[columnIndex]?.trim() ?? "";
+}
+
+/**
+ * Schritt-2-Feld `phoneNumber` leer → aus Schritt-1-CSV nachfüllen.
+ * textSnapshot.phoneNumber wird mitgezogen, wenn dort ebenfalls leer.
+ */
+export function backfillPersonPhoneFromCsv(
+  person: Person,
+  rowIndex: number,
+  csvData: string[][],
+  columnMapping: Record<string, string>
+): Person {
+  const step2Phone = (person.phoneNumber ?? "").trim();
+  if (step2Phone !== "") return person;
+
+  const fromStep1 = readPhoneNumberFromCsv(csvData, rowIndex, columnMapping);
+  if (fromStep1 === "") return person;
+
+  const snapshotPhone = (person.textSnapshot?.phoneNumber ?? "").trim();
+  const textSnapshot = person.textSnapshot
+    ? {
+        ...person.textSnapshot,
+        phoneNumber: snapshotPhone !== "" ? person.textSnapshot.phoneNumber : fromStep1,
+      }
+    : {
+        name: person.name ?? "",
+        intolerances: person.intolerances ?? "",
+        partner: person.partner ?? "",
+        kitchenAddress: person.kitchenAddress ?? "",
+        phoneNumber: fromStep1,
+        custom: { ...(person.customFieldValues ?? {}) },
+      };
+
+  return {
+    ...person,
+    phoneNumber: fromStep1,
+    textSnapshot,
+  };
+}
 
 /** v1 invitation placeholder token → v2 token(s) inside `{{…}}`. Longest `from` first at runtime. */
 const V1_TO_V2_TEMPLATE_REPLACEMENTS: Array<[from: string, to: string]> = [
@@ -182,4 +242,15 @@ function migrateV1ToV2(state: AppState): AppState {
   }
 
   return next;
+}
+
+function migrateV2ToV3(state: AppState): AppState {
+  const persons = state.persons.map((person, rowIndex) =>
+    backfillPersonPhoneFromCsv(person, rowIndex, state.csvData, state.columnMapping)
+  );
+
+  return {
+    ...state,
+    persons,
+  };
 }
