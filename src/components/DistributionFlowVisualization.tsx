@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Course, Distribution, Person, Team } from "@/types/models";
-import { getTeamPreference } from "@/utils/teamDerived";
+import { getTeamPreference, getTeamsPreference } from "@/utils/teamDerived";
 import { cn } from "@/lib/utils";
 
 const COURSE_ORDER: Course[] = ["Vorspeise", "Hauptspeise", "Nachspeise"];
@@ -19,21 +19,17 @@ type MealBubble = {
   mealPreference: string;
 };
 
-function aggregateMealPreference(preferences: string[]): string {
-  if (preferences.some((preference) => preference === "vegan")) return "vegan";
-  if (preferences.some((preference) => preference === "vegetarisch")) return "vegetarisch";
-  return "egal";
-}
-
 function buildMealsByCourse(
   distribution: Distribution[],
-  teamPreferenceById: Map<string, string>
+  teams: Team[],
+  persons: Person[]
 ): Record<Course, MealBubble[]> {
   const byCourse: Record<Course, MealBubble[]> = {
     Vorspeise: [],
     Hauptspeise: [],
     Nachspeise: [],
   };
+  const teamsById = new Map(teams.map((team) => [team.id, team]));
 
   for (const course of COURSE_ORDER) {
     const hosts = distribution.filter((d) => d.course === course);
@@ -54,16 +50,15 @@ function buildMealsByCourse(
       const host = hosts[hi];
       const bubbleId = `${host.cookTeamId}-${course}-${hi}`;
       const guestTeamIds = preferredHosts.get(host.cookTeamId) ?? [];
-      const mealPreference = aggregateMealPreference([
-        teamPreferenceById.get(host.cookTeamId) ?? "egal",
-        ...guestTeamIds.map((guestTeamId) => teamPreferenceById.get(guestTeamId) ?? "egal"),
-      ]);
+      const locationTeams = [host.cookTeamId, ...guestTeamIds]
+        .map((teamId) => teamsById.get(teamId))
+        .filter((team): team is Team => Boolean(team));
       byCourse[course].push({
         bubbleId,
         hostTeamId: host.cookTeamId,
         guestTeamIds,
         kitchenId: host.kitchenId,
-        mealPreference,
+        mealPreference: getTeamsPreference(locationTeams, persons),
       });
     }
   }
@@ -167,8 +162,8 @@ export function DistributionFlowVisualization({
   }, [teams, persons]);
 
   const mealsByCourse = useMemo(
-    () => buildMealsByCourse(distribution, teamPreferenceById),
-    [distribution, teamPreferenceById]
+    () => buildMealsByCourse(distribution, teams, persons),
+    [distribution, teams, persons]
   );
   const distByTeam = useMemo(() => {
     const m = new Map<string, Distribution>();
@@ -200,50 +195,48 @@ export function DistributionFlowVisualization({
 
   useLayoutEffect(() => {
     const el = containerRef.current;
-    if (!el || distribution.length === 0) {
-      setPaths([]);
-      return;
-    }
+    const next: { key: string; teamId: string; d: string; hue: number; dim: boolean }[] = [];
 
-    const cr = el.getBoundingClientRect();
-    if (cr.width < 8 || cr.height < 8) {
-      setPaths([]);
-      return;
-    }
+    if (el && distribution.length > 0) {
+      const cr = el.getBoundingClientRect();
+      if (cr.width >= 8 && cr.height >= 8) {
+        for (const teamId of allTeamIds) {
+          const reg = registryRef.current;
+          const vR = collectEdgeMids(reg, teamId, "Vorspeise", cr, "right");
+          const hL = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "left");
+          const hR = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "right");
+          const nL = collectEdgeMids(reg, teamId, "Nachspeise", cr, "left");
 
-    const result: { key: string; teamId: string; d: string; hue: number; dim: boolean }[] = [];
+          const hue = teamHue(teamId);
+          const dim = hoveredTeamId !== null && hoveredTeamId !== teamId;
 
-    for (const teamId of allTeamIds) {
-      const reg = registryRef.current;
-      const vR = collectEdgeMids(reg, teamId, "Vorspeise", cr, "right");
-      const hL = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "left");
-      const hR = collectEdgeMids(reg, teamId, "Hauptspeise", cr, "right");
-      const nL = collectEdgeMids(reg, teamId, "Nachspeise", cr, "left");
-
-      const hue = teamHue(teamId);
-      const dim = hoveredTeamId !== null && hoveredTeamId !== teamId;
-
-      if (vR && hL) {
-        result.push({
-          key: `${teamId}-vorspeise-hauptspeise`,
-          teamId,
-          d: cubicBetween(vR, hL),
-          hue,
-          dim,
-        });
-      }
-      if (hR && nL) {
-        result.push({
-          key: `${teamId}-hauptspeise-nachspeise`,
-          teamId,
-          d: cubicBetween(hR, nL),
-          hue,
-          dim,
-        });
+          if (vR && hL) {
+            next.push({
+              key: `${teamId}-vorspeise-hauptspeise`,
+              teamId,
+              d: cubicBetween(vR, hL),
+              hue,
+              dim,
+            });
+          }
+          if (hR && nL) {
+            next.push({
+              key: `${teamId}-hauptspeise-nachspeise`,
+              teamId,
+              d: cubicBetween(hR, nL),
+              hue,
+              dim,
+            });
+          }
+        }
       }
     }
 
-    setPaths(result);
+    // Defer path updates so measurement stays in the layout effect without a sync setState.
+    const frame = requestAnimationFrame(() => {
+      setPaths(next);
+    });
+    return () => cancelAnimationFrame(frame);
   }, [allTeamIds, distribution.length, hoveredTeamId, layoutSeq]);
 
   useLayoutEffect(() => {

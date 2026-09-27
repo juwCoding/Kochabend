@@ -6,7 +6,7 @@ import type { Course, Distribution, Team } from "@/types/models";
 import { createDistribution } from "@/utils/distribution";
 import { DistributionFlowVisualization } from "@/components/DistributionFlowVisualization";
 import { formatCookSnapshotLine, formatGuestSnapshotLine } from "@/utils/distributionDisplay";
-import { getTeamPreference } from "@/utils/teamDerived";
+import { getTeamPreference, getTeamsPreference } from "@/utils/teamDerived";
 import { Sparkles, AlertCircle, Users } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -14,12 +14,6 @@ function teamMemberLine(team: Team, persons: { id: string; name: string }[]): st
   const p1 = persons.find((p) => p.id === team.person1Id);
   const p2 = persons.find((p) => p.id === team.person2Id);
   return [p1?.name, p2?.name].filter(Boolean).join(" + ") || "Unbekanntes Team";
-}
-
-function aggregateMealPreference(preferences: string[]): string {
-  if (preferences.some((preference) => preference === "vegan")) return "vegan";
-  if (preferences.some((preference) => preference === "vegetarisch")) return "vegetarisch";
-  return "egal";
 }
 
 export function Step4Distribution() {
@@ -124,10 +118,10 @@ export function Step4Distribution() {
         };
       });
 
-    const mealPreferences = [
-      team ? teamPreferenceById.get(team.id) ?? "egal" : null,
-      ...guestDetails.map((guest) => guest.guestPreference),
-    ].filter((value): value is string => typeof value === "string" && value.length > 0);
+    const locationTeams = [
+      team,
+      ...guestDetails.map((guest) => guest.guestTeam),
+    ].filter((entry): entry is Team => Boolean(entry));
 
     return {
       dist,
@@ -135,7 +129,7 @@ export function Step4Distribution() {
       person1,
       person2,
       guestDetails,
-      mealPreference: aggregateMealPreference(mealPreferences),
+      mealPreference: getTeamsPreference(locationTeams, state.persons),
     };
   });
 

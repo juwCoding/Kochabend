@@ -49,11 +49,10 @@ export const DEFAULT_VALUE_MAPPINGS: ValueMapping[] = [
 /** Default favorite placeholder ids (v2). */
 export const DEFAULT_FAVORITE_PLACEHOLDERS: readonly string[] = [
   "Person.Name",
-  "Person.Telefonnummer",
-  "Team.Unverträglichkeiten",
+  "Team.UnverträglichkeitenAlle",
   "Team.Adresse",
   "Team.Gang",
-  "Team.Ernährungsform",
+  "Team.ErnährungsformAlle",
   "Team.Gäste",
   "Partner.Name",
   "Partner.Telefonnummer",

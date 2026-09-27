@@ -1,5 +1,12 @@
 import type { Person, Team, Distribution } from "@/types/models";
-import { getTeamPreference, getTeamPersons, hostsAtOwnKitchen } from "@/utils/teamDerived";
+import {
+  getTeamPreference,
+  getTeamsPreference,
+  getTeamIntoleranceTexts,
+  getTeamsIntoleranceTexts,
+  getTeamPersons,
+  hostsAtOwnKitchen,
+} from "@/utils/teamDerived";
 import {
   formatCourseLabel,
   formatFoodPreferenceLabel,
@@ -21,9 +28,17 @@ const TEAM_PLACEHOLDER_IDS = [
   "Team.Gang",
   "Team.Adresse",
   "Team.Ernährungsform",
+  "Team.ErnährungsformAlle",
   "Team.Unverträglichkeiten",
+  "Team.UnverträglichkeitenAlle",
   "Team.Gäste",
 ] as const;
+
+const EMPTY_INTOLERANCES_LABEL = "Keine Unverträglichkeiten";
+
+function formatIntolerancesLabel(texts: string[]): string {
+  return texts.length > 0 ? texts.join(", ") : EMPTY_INTOLERANCES_LABEL;
+}
 
 const GASTGEBER_SLOT_SUFFIXES = ["Gang", "Ernährungsform"] as const;
 
@@ -341,32 +356,43 @@ export function replacePlaceholders(
       ? formatFoodPreferenceLabel(getTeamPreference(cookingTeam, allPersons))
       : "";
 
-    result = replaceLiteralSafely(result, "{{Team.Gang}}", distribution.course);
-    result = replaceLiteralSafely(result, "{{Team.Adresse}}", distribution.kitchenId);
-    result = replaceLiteralSafely(result, "{{Team.Ernährungsform}}", cookingTeamPreference);
-
     const cookingGuestTeamIds = getDistributionGuestTeamIds(distribution);
     const cookingGuestTeams = cookingGuestTeamIds
       .map((teamId) => allTeams.find((t) => t.id === teamId))
       .filter((entry): entry is Team => Boolean(entry));
+    const locationTeams = cookingTeam
+      ? [cookingTeam, ...cookingGuestTeams]
+      : cookingGuestTeams;
+    const locationPreference = formatFoodPreferenceLabel(
+      getTeamsPreference(locationTeams, allPersons)
+    );
+
+    result = replaceLiteralSafely(result, "{{Team.Gang}}", distribution.course);
+    result = replaceLiteralSafely(result, "{{Team.Adresse}}", distribution.kitchenId);
+    result = replaceLiteralSafely(result, "{{Team.Ernährungsform}}", cookingTeamPreference);
+    result = replaceLiteralSafely(result, "{{Team.ErnährungsformAlle}}", locationPreference);
+
     const kochtGaeste = cookingGuestTeams
       .map((guestTeam) => getTeamDisplayName(guestTeam, allPersons))
       .filter((name) => name.trim().length > 0)
       .join(", ");
     result = replaceLiteralSafely(result, "{{Team.Gäste}}", kochtGaeste);
 
-    const guestPersons = cookingGuestTeams.flatMap((guestTeam) => {
-      const guestPerson1 = allPersons.find((p) => p.id === guestTeam.person1Id);
-      const guestPerson2 = allPersons.find((p) => p.id === guestTeam.person2Id);
-      return [guestPerson1, guestPerson2].filter((entry): entry is Person => Boolean(entry));
-    });
-    const intoleranceTexts = guestPersons
-      .map((guest) => guest.intolerances?.trim() || "")
-      .filter((text) => text.length > 0);
+    const cookingTeamIntolerances = cookingTeam
+      ? formatIntolerancesLabel(getTeamIntoleranceTexts(cookingTeam, allPersons))
+      : EMPTY_INTOLERANCES_LABEL;
+    const locationIntolerances = formatIntolerancesLabel(
+      getTeamsIntoleranceTexts(locationTeams, allPersons)
+    );
     result = replaceLiteralSafely(
       result,
       "{{Team.Unverträglichkeiten}}",
-      intoleranceTexts.length > 0 ? intoleranceTexts.join(", ") : "Keine Unverträglichkeiten"
+      cookingTeamIntolerances
+    );
+    result = replaceLiteralSafely(
+      result,
+      "{{Team.UnverträglichkeitenAlle}}",
+      locationIntolerances
     );
 
     const hostVisits = getHostVisits(distribution.cookTeamId, allDistributions);
@@ -425,7 +451,10 @@ export function replacePlaceholders(
     }
   } else {
     for (const id of TEAM_PLACEHOLDER_IDS) {
-      const value = id === "Team.Unverträglichkeiten" ? "Keine Unverträglichkeiten" : "";
+      const value =
+        id === "Team.Unverträglichkeiten" || id === "Team.UnverträglichkeitenAlle"
+          ? EMPTY_INTOLERANCES_LABEL
+          : "";
       result = replaceLiteralSafely(result, `{{${id}}}`, value);
     }
     for (const slot of ["Gastgeber1", "Gastgeber2"] as const) {

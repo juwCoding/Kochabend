@@ -83,6 +83,25 @@ export function getTeamPreference(team: Team, persons: Person[]): FoodPreference
   return combinePreference(person1?.preference, person2?.preference);
 }
 
+export function getTeamsPreference(teams: Team[], persons: Person[]): FoodPreference {
+  return teams.reduce<FoodPreference>(
+    (acc, team) => combinePreference(acc, getTeamPreference(team, persons)),
+    "egal"
+  );
+}
+
+export function getTeamIntoleranceTexts(team: Team, persons: Person[]): string[] {
+  const { person1, person2 } = getTeamPersons(team, persons);
+  return [person1, person2]
+    .filter((entry): entry is Person => Boolean(entry))
+    .map((person) => person.intolerances?.trim() || "")
+    .filter((text) => text.length > 0);
+}
+
+export function getTeamsIntoleranceTexts(teams: Team[], persons: Person[]): string[] {
+  return teams.flatMap((team) => getTeamIntoleranceTexts(team, persons));
+}
+
 function asCoursePreference(value: CoursePreference | undefined): Course | null {
   if (value === "Vorspeise" || value === "Hauptspeise" || value === "Nachspeise") {
     return value;
